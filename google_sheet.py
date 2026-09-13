@@ -3,17 +3,33 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 def get_sheet_client():
-    """เชื่อมต่อ Google Sheets ด้วย Service Account credentials.json"""
+    """เชื่อมต่อ Google Sheets ด้วย Service Account"""
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ]
+    
+    # กำหนดเส้นทางไฟล์: เช็คว่ามีในโฟลเดอร์ลับของ Render ไหม ถ้าไม่มีให้ใช้ชื่อไฟล์ปกติ
+    possible_paths = [
+        "/etc/secrets/credentials.json",
+        "credentials.json"
+    ]
+    
+    cred_file = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            cred_file = path
+            break
+            
     try:
-        creds = Credentials.from_service_account_file("credentials.json", scopes=scopes)
+        if not cred_file:
+            raise FileNotFoundError("ไม่พบไฟล์ credentials.json ทั้งในโฟลเดอร์หลักและ /etc/secrets/")
+            
+        creds = Credentials.from_service_account_file(cred_file, scopes=scopes)
         client = gspread.authorize(creds)
         return client
     except Exception as e:
-        print(f"Google Sheets Auth Error: {e}")
+        print(f"❌ Google Sheets Auth Error: {e}")
         return None
 
 def normalize_pickup(text):
