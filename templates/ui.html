@@ -1,0 +1,902 @@
+<!doctype html>
+<html lang="th" class="overflow-x-hidden">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>LINE Job Summary</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://cdn.jsdelivr.net/npm/lucide@0.577.0/dist/umd/lucide.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Sarabun:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --canvas: #f8fafc;
+      --card: #ffffff;
+      --primary: #2563eb;
+      --text: #0f172a;
+      --muted: #64748b;
+      --border: #f1f5f9;
+    }
+    * { box-sizing: border-box; }
+    
+    html, body {
+      max-width: 100vw;
+      overflow-x: hidden !important;
+      position: relative;
+    }
+
+    body { 
+      margin: 0; 
+      font-family: "Sarabun", "Plus Jakarta Sans", sans-serif; 
+      color: var(--text); 
+      background-color: #f8fafc; 
+    }
+
+    button, input, select, textarea { font: inherit; }
+    .app-shell { min-height: 100vh; width: 100%; max-width: 100vw; overflow-x: hidden; position: relative; }
+    .sidebar { width: 230px; transition: transform 0.3s ease; }
+    .view { display: none; width: 100%; }
+    .view.active { display: block; }
+    .nav-item { transition: all .15s ease; color: #475569; }
+    .nav-item.active { background: #eff6ff; color: #2563eb; font-weight: 600; }
+    .nav-item:hover:not(.active) { background: #f8fafc; color: #1e293b; }
+    .status-dot { width: 6px; height: 6px; border-radius: 999px; display: inline-block; }
+    .page-card { border: 1px solid #f1f5f9; background: #ffffff; border-radius: 12px; box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.02); max-width: 100%; }
+    .job-row { transition: background .15s ease; }
+    .job-row:hover { background: #f8fafc; }
+    .toast { opacity: 0; transform: translateY(16px); pointer-events: none; transition: .2s ease; }
+    .toast.show { opacity: 1; transform: translateY(0); }
+    .original-content { display: none; }
+    .original-content.open { display: block; }
+
+    .floating-nav-container {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 90%;
+      max-width: 400px;
+      background: #1e293b;
+      border-radius: 9999px;
+      padding: 8px 16px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+      z-index: 50;
+      display: flex;
+      justify-content: space-around;
+      align-items: center;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .floating-nav-item {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #94a3b8;
+      font-size: 10px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      padding: 6px 10px;
+      border-radius: 9999px;
+      position: relative;
+    }
+
+    .floating-nav-item span {
+      margin-top: 2px;
+      font-family: "Sarabun", sans-serif;
+    }
+
+    .floating-nav-item.active {
+      background: #2563eb;
+      color: #ffffff;
+      transform: translateY(-3px);
+      box-shadow: 0 4px 12px rgba(37, 99, 235, 0.4);
+    }
+
+    .floating-nav-item:hover:not(.active) {
+      color: #f8fafc;
+      background: rgba(255, 255, 255, 0.05);
+    }
+    
+    @media (max-width: 767px) {
+      .sidebar { display: none !important; }
+      .desktop-table { display: none; }
+      body { padding-bottom: 100px !important; }
+    }
+
+    @media (min-width: 768px) {
+      .sidebar { display: flex !important; }
+      .floating-nav-container { display: none !important; }
+      body { padding-bottom: 0px !important; }
+    }
+  </style>
+ </head>
+ <body class="w-full bg-[#F8FAFC] overflow-x-hidden">
+  <div class="app-shell flex w-full">
+   
+   <!-- Sidebar (Desktop) -->
+   <aside class="sidebar fixed inset-y-0 left-0 z-20 border-r border-[#F1F5F9] bg-white px-4 py-6 flex-col justify-between">
+    <div>
+     <div class="mb-8 flex items-center gap-3 px-2">
+      <div class="flex h-10 w-10 items-center justify-center rounded-xl bg-[#2563EB] text-white shadow-sm">
+       <i data-lucide="messages-square" class="h-5 w-5"></i>
+      </div>
+      <div>
+       <p class="m-0 text-sm font-bold leading-tight text-[#0F172A]">LINE Job<br>Summary</p>
+       <p class="m-0 text-[11px] text-[#94A3B8] font-normal mt-0.5">Job operations</p>
+      </div>
+     </div>
+     <nav aria-label="เมนูหลัก" class="space-y-1">
+      <button type="button" class="nav-item active flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs" data-view="dashboard"> 
+       <i data-lucide="layout-grid" class="h-4 w-4"></i><span>Dashboard</span> 
+      </button> 
+      <button type="button" class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs" data-view="jobs"> 
+       <i data-lucide="file-text" class="h-4 w-4"></i><span>ใบงาน</span> 
+      </button> 
+      <button type="button" class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs" data-view="queue"> 
+       <i data-lucide="clock" class="h-4 w-4"></i><span>Queue</span> 
+      </button> 
+      <button type="button" class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs" data-view="settings"> 
+       <i data-lucide="settings" class="h-4 w-4"></i><span>Settings</span> 
+      </button> 
+      <button type="button" class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs" data-view="test"> 
+       <i data-lucide="flask-conical" class="h-4 w-4"></i><span>ทดสอบใบงาน</span> 
+      </button>
+     </nav>
+    </div>
+    
+    <div class="border-t border-[#F1F5F9] pt-4 px-2">
+     <div class="flex items-center gap-2 text-[11px] text-[#64748B]">
+      <span class="status-dot bg-[#22C55E]"></span> <span>ระบบพร้อมใช้งาน</span>
+     </div>
+    </div>
+   </aside>
+
+   <!-- Main Shell -->
+   <div class="w-full md:ml-[230px] md:w-[calc(100%-230px)] overflow-x-hidden">
+
+    <!-- Floating Bottom Navigation Bar (สำหรับมือถือ) -->
+    <nav class="floating-nav-container">
+      <button type="button" class="floating-nav-item active" data-view="dashboard">
+        <i data-lucide="layout-grid" class="h-5 w-5"></i>
+        <span>หน้าแรก</span>
+      </button>
+      <button type="button" class="floating-nav-item" data-view="jobs">
+        <i data-lucide="file-text" class="h-5 w-5"></i>
+        <span>ใบงาน</span>
+      </button>
+      <button type="button" class="floating-nav-item" data-view="queue">
+        <i data-lucide="clock" class="h-5 w-5"></i>
+        <span>คิว</span>
+      </button>
+      <button type="button" class="floating-nav-item" data-view="settings">
+        <i data-lucide="settings" class="h-5 w-5"></i>
+        <span>ตั้งค่า</span>
+      </button>
+      <button type="button" class="floating-nav-item" data-view="test">
+        <i data-lucide="flask-conical" class="h-5 w-5"></i>
+        <span>ทดสอบ</span>
+      </button>
+    </nav>
+
+    <!-- Content Views -->
+    <main class="w-full px-4 pt-6 pb-20 md:px-6 md:py-8 max-w-7xl mx-auto overflow-x-hidden">
+     
+     <!-- DASHBOARD VIEW -->
+     <section id="dashboard" class="view active">
+      <div class="mb-6">
+       <h1 class="m-0 text-xl md:text-2xl font-bold tracking-tight text-[#0F172A]">DASHBOARD</h1>
+       <p class="mt-1 text-xs md:text-sm font-semibold text-[#64748B]">ภาพรวมใบงานวันนี้</p>
+      </div>
+
+      <!-- Stat Cards -->
+      <div class="grid grid-cols-2 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+       <article class="page-card p-3 md:p-4">
+        <div class="flex items-start justify-between">
+         <div>
+          <p class="m-0 text-xs text-[#64748B]">ใบงานวันนี้</p>
+          <p id="stat-total" class="mb-0 mt-2 text-xl md:text-2xl font-bold text-[#0F172A]">0</p>
+          <p class="mt-1 text-[11px] text-[#94A3B8]">รับเข้าระบบแล้ว</p>
+         </div>
+         <div class="p-2 bg-[#EFF6FF] text-[#2563EB] rounded-lg">
+          <i data-lucide="clipboard-list" class="h-4 w-4"></i>
+         </div>
+        </div>
+       </article>
+
+       <article class="page-card p-3 md:p-4">
+        <div class="flex items-start justify-between">
+         <div>
+          <p class="m-0 text-xs text-[#64748B]">รอประมวลผล</p>
+          <p id="stat-queue" class="mb-0 mt-2 text-xl md:text-2xl font-bold text-[#0F172A]">0</p>
+          <p class="mt-1 text-[11px] text-[#94A3B8]">อยู่ใน Queue</p>
+         </div>
+         <div class="p-2 bg-[#FEF3C7] text-[#D97706] rounded-lg">
+          <i data-lucide="clock" class="h-4 w-4"></i>
+         </div>
+        </div>
+       </article>
+
+       <article class="page-card p-3 md:p-4">
+        <div class="flex items-start justify-between">
+         <div>
+          <p class="m-0 text-xs text-[#64748B]">ส่งแล้ว</p>
+          <p id="stat-sent" class="mb-0 mt-2 text-xl md:text-2xl font-bold text-[#0F172A]">0</p>
+          <p class="mt-1 text-[11px] text-[#94A3B8]">สรุปสำเร็จ</p>
+         </div>
+         <div class="p-2 bg-[#DCFCE7] text-[#16A34A] rounded-lg">
+          <i data-lucide="check-circle-2" class="h-4 w-4"></i>
+         </div>
+        </div>
+       </article>
+
+       <article class="page-card p-3 md:p-4">
+        <div class="flex items-start justify-between">
+         <div>
+          <p class="m-0 text-xs text-[#64748B]">ผิดพลาด</p>
+          <p id="stat-error" class="mb-0 mt-2 text-xl md:text-2xl font-bold text-[#0F172A]">0</p>
+          <p class="mt-1 text-[11px] text-[#94A3B8]">ต้องตรวจสอบ</p>
+         </div>
+         <div class="p-2 bg-[#FEE2E2] text-[#DC2626] rounded-lg">
+          <i data-lucide="alert-circle" class="h-4 w-4"></i>
+         </div>
+        </div>
+       </article>
+      </div>
+
+      <!-- Queue Card -->
+      <article class="page-card mt-6 p-4 md:p-6">
+       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+         <h2 class="m-0 text-base font-bold text-[#0F172A]">Current Queue</h2>
+         <p class="mt-1 flex items-center gap-2 text-xs text-[#64748B] font-medium">
+          <span class="status-dot bg-[#94A3B8]"></span><span>ไม่มีคิวค้างอยู่ในขณะนี้</span>
+         </p>
+        </div>
+        <button type="button" class="queue-send rounded-lg bg-[#2563EB] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 transition-colors w-full sm:w-auto">ส่งทันที</button>
+       </div>
+
+       <div class="my-6 text-center">
+        <p id="dashboard-queue-count" class="m-0 text-xs text-[#64748B]">0 ใบงาน</p>
+        <p id="dashboard-countdown" class="mt-1 text-3xl md:text-4xl font-bold tracking-tight text-[#0F172A]">00:00</p>
+        <p class="mt-1 text-[11px] text-[#94A3B8]">เวลาก่อนระบบสรุปใบงาน</p>
+       </div>
+
+       <div class="mx-auto max-w-xl">
+        <div class="h-1.5 overflow-hidden rounded-full bg-[#F1F5F9]">
+         <div id="dashboard-progress" class="h-full w-[0%] rounded-full bg-[#2563EB] transition-all duration-500"></div>
+        </div>
+        <div class="mt-5 flex justify-center">
+         <button type="button" class="queue-clear rounded-lg border border-[#E2E8F0] px-4 py-1.5 text-xs font-medium text-[#64748B] hover:bg-[#F8FAFC]">ล้าง Queue</button>
+        </div>
+       </div>
+      </article>
+
+      <!-- Recent Jobs -->
+      <article class="page-card mt-6 p-4 md:p-6 mb-16">
+       <div class="flex items-center justify-between mb-2">
+        <h2 class="m-0 text-base font-bold text-[#0F172A]">ใบงานล่าสุด</h2>
+        <button type="button" data-view="jobs" class="flex items-center gap-1 text-xs font-semibold text-[#2563EB] hover:underline">
+         <span>ดูทั้งหมด</span><i data-lucide="arrow-right" class="h-3.5 w-3.5"></i>
+        </button>
+       </div>
+
+       <div id="recent-jobs-container" class="divide-y divide-[#F1F5F9]">
+        <p class="py-6 text-center text-xs text-[#94A3B8]">ยังไม่มีรายการใบงานในระบบ</p>
+       </div>
+      </article>
+     </section>
+
+     <!-- JOBS VIEW -->
+     <section id="jobs" class="view">
+      <div class="mb-6">
+       <h1 class="m-0 text-xl md:text-2xl font-bold tracking-tight text-[#0F172A]">ใบงาน</h1>
+       <p class="mt-1 text-xs md:text-sm font-semibold text-[#64748B]">รายการใบงานทั้งหมดที่ดึงจาก Google Sheets</p>
+      </div>
+
+      <div class="page-card p-3 mb-4">
+       <div class="grid grid-cols-1 gap-3 md:grid-cols-4">
+        <div class="relative md:col-span-2">
+         <i data-lucide="search" class="absolute left-3 top-2.5 h-4 w-4 text-[#94A3B8]"></i> 
+         <input id="job-search" type="search" placeholder="ค้นหา รหัส, จุดรับ, จุดส่ง, เที่ยวบิน, รถ..." class="w-full rounded-lg border border-[#E2E8F0] bg-white py-2 pl-9 pr-3 text-xs outline-none focus:border-[#2563EB]">
+        </div>
+        <div>
+         <select id="date-filter" class="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs outline-none focus:border-[#2563EB] text-[#334155]">
+          <option value="">วันที่ทั้งหมด</option>
+         </select>
+        </div>
+        <div>
+         <select id="status-filter" class="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs outline-none focus:border-[#2563EB] text-[#334155]">
+          <option value="">สถานะทั้งหมด</option>
+          <option value="sent">ส่งแล้ว</option>
+          <option value="waiting">รอส่ง</option>
+         </select>
+        </div>
+       </div>
+      </div>
+
+      <!-- Responsive Table Container -->
+      <div class="page-card overflow-hidden">
+       <div class="overflow-x-auto w-full">
+        <table class="w-full text-left text-xs whitespace-nowrap">
+         <thead class="border-b border-[#F1F5F9] bg-[#FAFBFD] text-[11px] font-semibold text-[#64748B]">
+          <tr>
+           <th class="px-4 py-3 font-medium">วันที่</th>
+           <th class="px-4 py-3 font-medium">รหัส</th>
+           <th class="px-4 py-3 font-medium">เวลา</th>
+           <th class="px-4 py-3 font-medium">จุดรับ</th>
+           <th class="px-4 py-3 font-medium">จุดส่ง</th>
+           <th class="px-4 py-3 font-medium">เที่ยวบิน</th>
+           <th class="px-4 py-3 font-medium">Order Number</th>
+           <th class="px-4 py-3 font-medium">รถ</th>
+           <th class="px-4 py-3 font-medium">ราคา</th>
+           <th class="px-4 py-3 font-medium">สถานะ</th>
+           <th class="px-4 py-3 font-medium text-right">จัดการ</th>
+          </tr>
+         </thead>
+         <tbody id="jobs-table-body" class="divide-y divide-[#F1F5F9] text-[#334155]">
+          <tr>
+           <td colspan="11" class="px-5 py-8 text-center text-[#94A3B8]">ยังไม่มีข้อมูลใบงาน</td>
+          </tr>
+         </tbody>
+        </table>
+       </div>
+      </div>
+     </section>
+
+     <!-- DETAIL VIEW -->
+     <section id="detail" class="view">
+      <button type="button" data-view="jobs" class="mb-4 flex items-center gap-2 text-xs font-semibold text-[#64748B] hover:text-[#2563EB]">
+       <i data-lucide="arrow-left" class="h-4 w-4"></i><span>ย้อนกลับ</span>
+      </button>
+
+      <div class="mb-6 flex flex-col sm:flex-row sm:items-start justify-between gap-2">
+       <div>
+        <h1 class="m-0 text-xl md:text-2xl font-bold tracking-tight text-[#0F172A]">รายละเอียดใบงาน</h1>
+        <p class="mt-1 text-xs md:text-sm font-semibold text-[#64748B]">ข้อมูลเชิงลึกของใบงานที่เลือก</p>
+       </div>
+       <span id="detail-status" class="flex items-center gap-1.5 text-xs font-medium text-[#64748B]"><span class="status-dot bg-[#94A3B8]"></span>-</span>
+      </div>
+
+      <article class="page-card p-4 md:p-6">
+       <h2 class="m-0 text-sm font-bold text-[#0F172A]" id="detail-id">-</h2>
+       <p id="detail-date" class="mt-1 text-xs text-[#64748B]">-</p>
+       <dl id="detail-grid" class="mt-4 grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-3 text-xs"></dl>
+      </article>
+
+      <article class="page-card mt-5 p-4 md:p-6">
+       <div class="flex items-center justify-between">
+        <h2 class="m-0 text-sm font-bold text-[#0F172A]">ข้อความสรุป</h2>
+        <div class="flex gap-2">
+         <button id="copy-summary" type="button" class="rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-xs font-medium text-[#64748B] hover:bg-[#F8FAFC]">คัดลอก</button>
+        </div>
+       </div>
+       <pre id="detail-summary-text" class="mt-4 whitespace-pre-wrap rounded-lg bg-[#F8FAFC] p-4 text-xs leading-5 text-[#334155] border border-[#F1F5F9] max-w-full overflow-x-auto"></pre>
+      </article>
+
+      <article class="page-card mt-5 p-4 md:p-6">
+       <div class="flex items-center justify-between">
+        <h2 class="m-0 text-sm font-bold text-[#0F172A]">ข้อความต้นฉบับ</h2>
+        <button id="toggle-original" type="button" class="text-xs font-medium text-[#2563EB]">แสดง/ซ่อน</button>
+       </div>
+       <pre id="original-content" class="original-content mt-4 whitespace-pre-wrap rounded-lg bg-[#F8FAFC] p-4 text-xs leading-5 text-[#64748B] border border-[#F1F5F9] max-w-full overflow-x-auto"></pre>
+      </article>
+     </section>
+
+     <!-- QUEUE VIEW -->
+     <section id="queue" class="view">
+      <div class="mb-6">
+       <h1 class="m-0 text-xl md:text-2xl font-bold tracking-tight text-[#0F172A]">QUEUE</h1>
+       <p class="mt-1 text-xs md:text-sm font-semibold text-[#64748B]">ใบงานที่กำลังรอประมวลผล</p>
+      </div>
+
+      <article class="page-card p-4 md:p-6">
+       <div class="grid gap-6 sm:grid-cols-3">
+        <div>
+         <p class="m-0 text-xs text-[#64748B]">ใบงานใน Queue</p>
+         <p id="queue-view-count" class="mb-0 mt-2 text-xl md:text-2xl font-bold text-[#0F172A]">0 ใบงาน</p>
+         <div class="mt-4 flex gap-2">
+          <button type="button" class="queue-send rounded-lg bg-[#2563EB] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-blue-700">ส่งทันที</button>
+          <button type="button" class="queue-clear rounded-lg border border-[#E2E8F0] px-3.5 py-1.5 text-xs font-medium text-[#64748B] hover:bg-[#F8FAFC]">ล้าง Queue</button>
+         </div>
+        </div>
+        <div>
+         <p class="m-0 text-xs text-[#64748B]">เวลาที่เหลือ</p>
+         <p id="queue-countdown" class="mb-0 mt-2 text-xl md:text-2xl font-bold text-[#0F172A]">00:00</p>
+        </div>
+        <div>
+         <p class="flex items-center gap-2 text-xs font-medium text-[#64748B]"><span class="status-dot bg-[#94A3B8]"></span><span>ไม่มีคิวค้างในขณะนี้</span></p>
+        </div>
+       </div>
+      </article>
+
+      <article class="page-card mt-5 p-4 md:p-6">
+       <h2 class="m-0 text-sm font-bold text-[#0F172A]">รายการที่รอส่ง</h2>
+       <div id="queue-list" class="queue-list mt-3 divide-y divide-[#F1F5F9]"></div>
+       <p id="queue-empty" class="py-6 text-center text-xs text-[#94A3B8]">ไม่มีใบงานค้างใน Queue</p>
+      </article>
+     </section>
+
+     <!-- SETTINGS VIEW -->
+     <section id="settings" class="view">
+      <div class="mb-6">
+       <h1 class="m-0 text-xl md:text-2xl font-bold tracking-tight text-[#0F172A]">SETTINGS</h1>
+       <p class="mt-1 text-xs md:text-sm font-semibold text-[#64748B]">ตั้งค่าการทำงานของระบบ</p>
+      </div>
+
+      <div class="grid gap-5 lg:grid-cols-2">
+       <article class="page-card p-4 md:p-6">
+        <h2 class="m-0 text-sm font-bold text-[#0F172A]">เวลารอประมวลผล</h2>
+        <label for="waiting-time" class="mt-4 block text-xs text-[#64748B]">เลือกระยะเวลาก่อนระบบส่งสรุป</label> 
+        <select id="waiting-time" class="mt-2 w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs outline-none focus:border-[#2563EB] text-[#334155]">
+         <option value="30">30 วินาที</option>
+         <option value="60">1 นาที</option>
+         <option value="120">2 นาที</option>
+         <option value="300">5 นาที</option>
+         <option value="600">10 นาที</option>
+        </select>
+       </article>
+
+       <article class="page-card p-4 md:p-6">
+        <h2 class="m-0 text-sm font-bold text-[#0F172A]">System Status</h2>
+        <div class="mt-4 space-y-3.5 text-xs">
+         <div class="flex justify-between border-b border-[#F1F5F9] pb-3">
+          <span class="text-[#64748B]">LINE OA</span>
+          <span class="flex items-center gap-1.5 text-[#22C55E] font-medium"><span class="status-dot bg-[#22C55E]"></span>Connected</span>
+         </div>
+         <div class="flex justify-between border-b border-[#F1F5F9] pb-3">
+          <span class="text-[#64748B]">Google Sheets</span>
+          <span class="flex items-center gap-1.5 text-[#22C55E] font-medium"><span class="status-dot bg-[#22C55E]"></span>Connected</span>
+         </div>
+        </div>
+       </article>
+      </div>
+
+      <button id="save-settings" type="button" class="mt-5 rounded-lg bg-[#2563EB] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 w-full sm:w-auto">บันทึกการตั้งค่า</button>
+     </section>
+
+     <!-- TEST VIEW -->
+     <section id="test" class="view">
+      <div class="mb-6">
+       <h1 class="m-0 text-xl md:text-2xl font-bold tracking-tight text-[#0F172A]">ทดสอบใบงาน</h1>
+       <p class="mt-1 text-xs md:text-sm font-semibold text-[#64748B]">วางข้อความใบงานเพื่อทดสอบการเพิ่มเข้าคิว</p>
+      </div>
+
+      <form id="test-form" class="page-card max-w-xl p-4 md:p-6">
+       <label for="job-text" class="block text-xs font-medium text-[#0F172A]">ข้อความใบงาน</label> 
+       <textarea id="job-text" required placeholder="วางข้อความใบงานจาก LINE ที่นี่..." class="mt-2 min-h-36 w-full rounded-lg border border-[#E2E8F0] bg-[#FAFBFD] p-3 text-xs outline-none focus:border-[#2563EB] focus:bg-white focus:ring-1 focus:ring-blue-100"></textarea> 
+       <button type="submit" class="mt-4 rounded-lg bg-[#2563EB] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 w-full sm:w-auto">เพิ่มใบงาน</button>
+       
+       <div id="test-success" class="mt-5 hidden border-t border-[#F1F5F9] pt-4">
+        <p class="m-0 text-xs font-medium text-[#22C55E]">เพิ่มเข้าคิวเรียบร้อยแล้ว</p>
+        <p id="test-result-id" class="mt-2 text-xs font-bold text-[#0F172A]"></p>
+        <p class="mt-1 text-xs text-[#64748B]">สถานะ: รอส่ง</p>
+       </div>
+      </form>
+     </section>
+
+    </main>
+   </div>
+  </div>
+
+  <!-- Custom Modal Popup -->
+  <div id="custom-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm hidden p-4">
+    <div class="page-card w-full max-w-sm p-5 md:p-6 bg-white shadow-xl rounded-2xl">
+      <div class="flex items-center gap-3 mb-3">
+        <div class="p-2.5 bg-red-50 text-red-600 rounded-xl">
+          <i data-lucide="alert-triangle" class="h-5 w-5"></i>
+        </div>
+        <div>
+          <h3 class="m-0 text-sm font-bold text-[#0F172A]" id="modal-title">ยืนยันการลบ</h3>
+          <p class="m-0 text-[11px] text-[#64748B]" id="modal-desc">คุณต้องการลบรายการนี้ใช่หรือไม่?</p>
+        </div>
+      </div>
+      <div class="mt-6 flex justify-end gap-2">
+        <button id="modal-cancel" type="button" class="rounded-lg border border-[#E2E8F0] px-4 py-2 text-xs font-medium text-[#64748B] hover:bg-[#F8FAFC]">ยกเลิก</button>
+        <button id="modal-confirm" type="button" class="rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700">ลบข้อมูล</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification -->
+  <div id="toast" class="toast fixed bottom-5 right-5 z-50 flex items-center gap-2 rounded-lg bg-[#0F172A] px-4 py-2.5 text-xs text-white shadow-lg" role="status">
+   <i data-lucide="check-circle-2" class="h-4 w-4 text-[#22C55E]"></i>
+   <span id="toast-message">ดำเนินการเรียบร้อยแล้ว</span>
+  </div>
+
+  <script>
+    let localJobs = {};
+    const titles = { 
+      dashboard: "DASHBOARD\nภาพรวมใบงานวันนี้", 
+      jobs: "ใบงาน\nรายการใบงานทั้งหมดที่ดึงจาก Google Sheets", 
+      detail: "รายละเอียดใบงาน\nข้อมูลเชิงลึกของใบงานที่เลือก", 
+      queue: "QUEUE\nใบงานที่กำลังรอประมวลผล", 
+      settings: "SETTINGS\nตั้งค่าการทำงานของระบบ", 
+      test: "ทดสอบใบงาน\nวางข้อความใบงานเพื่อทดสอบการเพิ่มเข้าคิว" 
+    };
+    let toastTimer;
+    let deleteTargetId = null;
+    let serverMaxWaitSeconds = 120;
+
+    function getJobVal(job, ...keys) {
+      if (!job) return "-";
+      for (let k of keys) {
+        if (job[k] !== undefined && job[k] !== null && job[k] !== "") {
+          return job[k];
+        }
+      }
+      return "-";
+    }
+
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      document.getElementById("toast-message").textContent = message;
+      toast.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => toast.classList.remove("show"), 2600);
+    }
+
+    function showView(view) {
+      document.querySelectorAll(".view").forEach(item => item.classList.toggle("active", item.id === view));
+      document.querySelectorAll("[data-view]").forEach(item => item.classList.toggle("active", item.dataset.view === view));
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function openJob(jobId) {
+      const job = localJobs[jobId];
+      if (!job) return;
+
+      const id = getJobVal(job, 'id', 'job_id', 'code', 'ID', 'รหัส');
+      const date = getJobVal(job, 'date', 'created_at', 'วันที่', 'Date');
+      const time = getJobVal(job, 'time', 'เวลา', 'Time');
+      const statusText = "บันทึกใน Sheet แล้ว";
+
+      document.getElementById("detail-id").textContent = id;
+      document.getElementById("detail-date").textContent = date + " • " + time;
+      
+      const status = document.getElementById("detail-status");
+      status.className = "flex items-center gap-1.5 text-xs font-medium text-[#22C55E]";
+      status.innerHTML = '<span class="status-dot bg-[#22C55E]"></span>' + statusText;
+
+      const carCode = getJobVal(job, 'car_code', 'car', 'รถ', 'Car');
+      const priceVal = getJobVal(job, 'price', 'ราคา', 'Price');
+      const pickupDisp = getJobVal(job, 'pickup_display', 'pickup', 'จุดรับ', 'Pickup');
+      const dropoffDisp = getJobVal(job, 'dropoff_display', 'dropoff', 'จุดส่ง', 'Dropoff');
+      const flightVal = getJobVal(job, 'flight', 'เที่ยวบิน', 'Flight');
+      const orderVal = getJobVal(job, 'Order Number', 'order', 'Order', 'คำสั่งซื้อ');
+
+      const fields = [
+        ["รถ", carCode], 
+        ["ราคา", priceVal + " บาท"], 
+        ["จุดรับ", pickupDisp], 
+        ["จุดส่ง", dropoffDisp], 
+        ["เที่ยวบิน", flightVal], 
+        ["Order Number", orderVal]
+      ];
+      
+      document.getElementById("detail-grid").innerHTML = fields.map(field => 
+        '<div><dt class="text-xs text-[#64748B]">' + field[0] + '</dt><dd class="mt-1 font-semibold text-[#0F172A]">' + field[1] + '</dd></div>'
+      ).join("");
+      
+      const summary = job.formatted_summary || `${id}(🥶)${time}/${priceVal}#${carCode}\n${pickupDisp}-${dropoffDisp} ✈️${flightVal}\n${orderVal}`;
+      document.getElementById("detail-summary-text").textContent = summary;
+      document.getElementById("original-content").textContent = job.text || job.raw_text || "ดึงข้อมูลจาก Google Sheets เรียบร้อย";
+      document.getElementById("original-content").classList.remove("open");
+      showView("detail");
+    }
+
+    async function fetchGoogleSheetsData() {
+      try {
+        const res = await fetch('/api/get_sheets_data');
+        if (!res.ok) return;
+        const result = await res.json();
+        
+        if (result.success && result.data && result.data.length > 0) {
+          const sheetJobs = result.data.map((r, index) => ({
+            id: r.รหัสใบงาน || r.job_id || r.ID || r.รหัส || r.Code || `JOB-${index + 1}`,
+            date: r.date || r.Date || r.วันที่ || "-",
+            time: r.time || r.Time || r.เวลา || "-",
+            pickup_display: r.pickup_display || r.Pickup || r.จุดรับ || "-",
+            dropoff_display: r.dropoff_display || r.Dropoff || r.จุดส่ง || "-",
+            flight: r.flight || r.Flight || r.เที่ยวบิน || "-",
+            order: r['Order Number'] || r.order || r.Order || r.คำสั่งซื้อ || "-",
+            car_code: r.car_code || r.Car || r.รถ || "-",
+            price: r.price || r.Price || r.ราคา || "-",
+            status: "ส่งแล้ว",
+            text: r.formatted_summary || r.text || JSON.stringify(r)
+          }));
+
+          renderRecentJobs(sheetJobs);
+          renderJobsTable(sheetJobs);
+          document.getElementById('stat-total').innerText = sheetJobs.length;
+          document.getElementById('stat-sent').innerText = sheetJobs.length;
+        }
+      } catch (err) {
+        console.error("Error loading sheets data:", err);
+      }
+    }
+    
+    async function fetchDashboardData() {
+      try {
+        const res = await fetch('/api/status');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        document.getElementById('stat-queue').innerText = data.queue_count ?? 0;
+        document.getElementById('dashboard-queue-count').innerText = `${data.queue_count ?? 0} ใบงาน`;
+        document.getElementById('queue-view-count').innerText = `${data.queue_count ?? 0} ใบงาน`;
+
+        if (data.max_wait_seconds) {
+          serverMaxWaitSeconds = data.max_wait_seconds;
+          const waitingSelect = document.getElementById('waiting-time');
+          if (waitingSelect && document.activeElement !== waitingSelect) {
+            waitingSelect.value = serverMaxWaitSeconds.toString();
+          }
+        }
+
+        if (data.time_left_seconds !== undefined && data.queue_count > 0) {
+          const mins = Math.floor(data.time_left_seconds / 60).toString().padStart(2, '0');
+          const secs = (data.time_left_seconds % 60).toString().padStart(2, '0');
+          const timeStr = `${mins}:${secs}`;
+          document.getElementById('dashboard-countdown').innerText = timeStr;
+          document.getElementById('queue-countdown').innerText = timeStr;
+          
+          const pct = Math.min(100, Math.max(0, (data.time_left_seconds / serverMaxWaitSeconds) * 100));
+          document.getElementById('dashboard-progress').style.width = `${pct}%`;
+        } else {
+          document.getElementById('dashboard-countdown').innerText = "00:00";
+          document.getElementById('queue-countdown').innerText = "00:00";
+          document.getElementById('dashboard-progress').style.width = "0%";
+        }
+
+        if (data.latest_jobs && data.latest_jobs.length > 0) {
+          renderQueueList(data.latest_jobs.filter(j => j.status === 'รอส่ง' || j.status === 'waiting'));
+        }
+
+      } catch (err) {
+        // รอการเชื่อมต่อ
+      }
+    }
+
+    function renderRecentJobs(jobList) {
+      const container = document.getElementById('recent-jobs-container');
+      if (!container) return;
+
+      container.innerHTML = jobList.slice(0, 5).map(job => {
+        const id = getJobVal(job, 'id', 'job_id', 'code', 'ID', 'รหัส');
+        localJobs[id] = job;
+
+        const time = getJobVal(job, 'time', 'เวลา', 'Time');
+        const pickup = getJobVal(job, 'pickup_display', 'pickup', 'จุดรับ', 'Pickup');
+        const dropoff = getJobVal(job, 'dropoff_display', 'dropoff', 'จุดส่ง', 'Dropoff');
+        const flight = getJobVal(job, 'flight', 'เที่ยวบิน', 'Flight');
+        const car = getJobVal(job, 'car_code', 'car', 'รถ', 'Car');
+
+        return `
+        <button type="button" onclick="openJob('${id}')" class="job-open flex w-full items-center justify-between py-3.5 text-left border-b border-[#F1F5F9] last:border-0 hover:bg-[#F8FAFC]">
+         <div>
+          <p class="m-0 text-xs font-bold text-[#0F172A]">${id} <span class="ml-2 font-normal text-[#94A3B8]">${time}</span> <span class="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600 font-semibold">${car}</span></p>
+          <p class="mt-1 text-xs text-[#64748B]">${pickup} → ${dropoff} <span class="ml-3 text-[#0F172A] font-medium">${flight}</span></p>
+         </div>
+         <span class="flex items-center gap-1.5 text-[11px] font-medium text-[#22C55E]">
+          <span class="status-dot bg-[#22C55E]"></span>ส่งแล้ว
+         </span>
+        </button>`;
+      }).join('');
+    }
+
+    function renderJobsTable(jobList) {
+      const tbody = document.getElementById('jobs-table-body');
+      if (!tbody) return;
+
+      if (!jobList || jobList.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="11" class="px-5 py-8 text-center text-[#94A3B8]">ยังไม่มีข้อมูลใบงาน</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = jobList.map((job) => {
+        const id = getJobVal(job, 'รหัสใบงาน', 'id', 'job_id', 'code', 'ID', 'รหัส');
+        localJobs[id] = job;
+
+        const date = getJobVal(job, 'date', 'Date', 'วันที่', '-');
+        const time = getJobVal(job, 'time', 'Time', 'เวลา', '-');
+        const pickup = getJobVal(job, 'pickup_display', 'Pickup', 'จุดรับ', '-');
+        const dropoff = getJobVal(job, 'dropoff_display', 'Dropoff', 'จุดส่ง', '-');
+        const flight = getJobVal(job, 'flight', 'Flight', 'เที่ยวบิน', '-');
+        const order = getJobVal(job, 'Order Number', 'order', 'Order', 'คำสั่งซื้อ', '-');
+        const car = getJobVal(job, 'car_code', 'Car', 'รถ', '-');
+        const price = getJobVal(job, 'price', 'Price', 'ราคา', '-');
+
+        return `
+        <tr class="job-row hover:bg-[#F8FAFC]">
+          <td class="px-4 py-3.5 cursor-pointer" onclick="openJob('${id}')">${date}</td>
+          <td class="px-4 py-3.5 font-bold text-[#2563EB] cursor-pointer" onclick="openJob('${id}')">${id}</td>
+          <td class="px-4 py-3.5 cursor-pointer" onclick="openJob('${id}')">${time}</td>
+          <td class="px-4 py-3.5 cursor-pointer" onclick="openJob('${id}')">${pickup}</td>
+          <td class="px-4 py-3.5 cursor-pointer" onclick="openJob('${id}')">${dropoff}</td>
+          <td class="px-4 py-3.5 cursor-pointer" onclick="openJob('${id}')">${flight}</td>
+          <td class="px-4 py-3.5 font-mono text-[11px] text-[#64748B] cursor-pointer" onclick="openJob('${id}')">${order}</td>
+          <td class="px-4 py-3.5 font-semibold text-[#0F172A] cursor-pointer" onclick="openJob('${id}')">${car}</td>
+          <td class="px-4 py-3.5 font-medium text-[#16A34A] cursor-pointer" onclick="openJob('${id}')">${price}</td>
+          <td class="px-4 py-3.5 cursor-pointer" onclick="openJob('${id}')">
+            <span class="flex items-center gap-1.5 text-[11px] font-medium text-[#22C55E]">
+              <span class="status-dot bg-[#22C55E]"></span>ส่งแล้ว
+            </span>
+          </td>
+          <td class="px-4 py-3.5 text-right">
+            <button type="button" onclick="deleteJobRow('${id}')" class="rounded bg-red-50 px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-100">ลบ</button>
+          </td>
+        </tr>`;
+      }).join('');
+    }
+
+    function deleteJobRow(jobId) {
+      deleteTargetId = jobId;
+      document.getElementById("modal-desc").textContent = `คุณต้องการลบใบงานรหัส ${jobId} ใช่หรือไม่?`;
+      document.getElementById("custom-modal").classList.remove("hidden");
+      lucide.createIcons();
+    }
+
+    function renderQueueList(queueJobs) {
+      const listEl = document.getElementById('queue-list');
+      const emptyEl = document.getElementById('queue-empty');
+      if (!listEl) return;
+
+      if (!queueJobs || queueJobs.length === 0) {
+        listEl.innerHTML = '';
+        if (emptyEl) emptyEl.style.display = 'block';
+        return;
+      }
+
+      if (emptyEl) emptyEl.style.display = 'none';
+      listEl.innerHTML = queueJobs.map(job => {
+        const id = getJobVal(job, 'id', 'job_id', 'code');
+        const time = getJobVal(job, 'time', 'เวลา');
+        const pickup = getJobVal(job, 'pickup_display', 'pickup', 'จุดรับ');
+        const dropoff = getJobVal(job, 'dropoff_display', 'dropoff', 'จุดส่ง');
+        const flight = getJobVal(job, 'flight', 'เที่ยวบิน');
+        const car = getJobVal(job, 'car_code', 'car', 'รถ');
+
+        return `
+        <button type="button" onclick="openJob('${id}')" class="flex w-full items-center justify-between py-3.5 text-left border-b border-[#F1F5F9] hover:bg-[#F8FAFC]">
+         <div>
+          <p class="m-0 text-xs font-bold text-[#0F172A]">${id} <span class="ml-2 font-normal text-[#94A3B8]">${time}</span> <span class="ml-2 font-semibold text-[#2563EB]">(${car})</span></p>
+          <p class="mt-1 text-xs text-[#64748B]">${pickup} → ${dropoff}</p>
+         </div><span class="text-xs font-medium text-[#334155]">${flight}</span>
+        </button>`;
+      }).join('');
+    }
+
+    document.addEventListener("DOMContentLoaded", () => {
+      document.querySelectorAll("[data-view]").forEach(button => {
+        button.addEventListener("click", () => showView(button.dataset.view));
+      });
+
+      document.getElementById("modal-cancel").addEventListener("click", () => {
+        document.getElementById("custom-modal").classList.add("hidden");
+        deleteTargetId = null;
+      });
+
+      document.getElementById("modal-confirm").addEventListener("click", async () => {
+        if (deleteTargetId) {
+          try {
+            const res = await fetch('/api/delete_job', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: deleteTargetId })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+              delete localJobs[deleteTargetId];
+              showToast(`ลบใบงาน ${deleteTargetId} สำเร็จ`);
+              fetchGoogleSheetsData();
+            } else {
+              showToast(data.message || "ลบข้อมูลไม่สำเร็จ");
+            }
+          } catch (err) {
+            console.error(err);
+            showToast("เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์");
+          }
+          
+          document.getElementById("custom-modal").classList.add("hidden");
+          deleteTargetId = null;
+        }
+      });
+
+      document.getElementById("job-search").addEventListener("input", () => {
+        const query = document.getElementById("job-search").value.trim().toLowerCase();
+        document.querySelectorAll("#jobs-table-body tr").forEach(row => {
+          row.style.display = row.innerText.toLowerCase().includes(query) ? "" : "none";
+        });
+      });
+
+      document.querySelectorAll(".queue-send").forEach(button => {
+        button.addEventListener("click", async () => {
+          try {
+            const res = await fetch('/api/trigger_send', { method: 'POST' });
+            const data = await res.json();
+            showToast(data.message || "ส่งสรุปใบงานเรียบร้อยแล้ว");
+            fetchDashboardData();
+            fetchGoogleSheetsData();
+          } catch (e) {
+            showToast("ส่งสรุปใบงานเรียบร้อยแล้ว");
+          }
+        });
+      });
+
+      document.querySelectorAll(".queue-clear").forEach(button => {
+        button.addEventListener("click", async () => {
+          try {
+            const res = await fetch('/api/clear_queue', { method: 'POST' });
+            const data = await res.json();
+            showToast(data.message || "ล้าง Queue เรียบร้อยแล้ว");
+            fetchDashboardData();
+          } catch (e) {
+            showToast("ล้าง Queue เรียบร้อยแล้ว");
+          }
+        });
+      });
+
+      document.getElementById("test-form").addEventListener("submit", async event => {
+        event.preventDefault();
+        const input = document.getElementById("job-text");
+        if (!input.value.trim()) return;
+
+        try {
+          const res = await fetch('/api/add_job', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: input.value.trim() })
+          });
+          const data = await res.json();
+          const returnedId = data.id || "คำร้องสำเร็จ";
+          document.getElementById("test-result-id").textContent = returnedId;
+          document.getElementById("test-success").classList.remove("hidden");
+          showToast(data.message || "เพิ่มใบงานเข้าคิวแล้ว");
+          input.value = "";
+          fetchDashboardData();
+        } catch (e) {
+          showToast("ส่งข้อมูลไปยังระบบทดสอบแล้ว");
+        }
+      });
+
+      document.getElementById("toggle-original").addEventListener("click", () => {
+        document.getElementById("original-content").classList.toggle("open");
+      });
+
+      document.getElementById("copy-summary").addEventListener("click", async () => {
+        try {
+          await navigator.clipboard.writeText(document.getElementById("detail-summary-text").textContent);
+          showToast("คัดลอกข้อความสรุปแล้ว");
+        } catch (error) {
+          showToast("ไม่สามารถคัดลอกได้");
+        }
+      });
+
+      document.getElementById("save-settings").addEventListener("click", async () => {
+        const waitingTimeVal = document.getElementById("waiting-time").value;
+
+        try {
+          const res = await fetch('/api/save_settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ waiting_time: waitingTimeVal })
+          });
+          const data = await res.json();
+          showToast(data.message || "บันทึกการตั้งค่าเรียบร้อยแล้ว");
+          fetchDashboardData();
+        } catch (e) {
+          showToast("บันทึกการตั้งค่าเรียบร้อยแล้ว");
+        }
+      });
+
+      setInterval(fetchDashboardData, 1000);
+      fetchDashboardData();
+      fetchGoogleSheetsData();
+      lucide.createIcons();
+    });
+  </script>
+ </body>
+</html>

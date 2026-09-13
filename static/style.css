@@ -1,0 +1,170 @@
+/* ==========================================================
+   1. ตัวแปรและค่าพื้นฐาน (Global Reset & Variables)
+   ========================================================== */
+:root {
+  --nav-height: 70px;
+  --spacing-mobile: 12px;
+  --primary-color: #2563eb;
+  --bg-color: #ffffff;
+  --text-main: #1e293b;
+  --text-muted: #64748b;
+  --border-color: rgba(226, 232, 240, 0.8);
+}
+
+/* ล็อกขนาดและป้องกันล้นหน้าจอทุกอุปกรณ์ */
+html, body {
+  width: 100%;
+  max-width: 100vw;
+  overflow-x: hidden !important;
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+*, *::before, *::after {
+  box-sizing: inherit;
+}
+
+
+/* ==========================================================
+   2. สไตล์สำหรับ Mobile Bottom Navigation (แสดงเฉพาะหน้าจอเล็ก)
+   ========================================================== */
+.floating-nav-container {
+  position: fixed;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(92%, 420px);
+  background-color: var(--bg-color) !important;
+  color: var(--text-main) !important;
+  border-radius: 9999px;
+  padding: 6px 12px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+  z-index: 9999;
+  display: none;
+  justify-content: space-around;
+  align-items: center;
+  border: 1px solid var(--border-color);
+  backdrop-filter: blur(8px);
+}
+
+.floating-nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  transition: all 0.25s ease-in-out;
+  padding: 6px 10px;
+  border-radius: 9999px;
+  flex: 1;
+}
+
+.floating-nav-item.active {
+  background: var(--primary-color);
+  color: #ffffff;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+}
+
+
+/* ==========================================================
+   3. การตั้งค่าสำหรับมือถือและแท็บเล็ต (Screen Max 1023px)
+   ========================================================== */
+@media screen and (max-width: 1023px) {
+  /* แสดง Nav บนมือถือ[cite: 4] */
+  .floating-nav-container {
+    display: flex !important;
+  }
+
+  /* ซ่อน Sidebar ทุกรูปแบบบนมือถือ[cite: 4] */
+  aside, 
+  .sidebar, 
+  [class*="sidebar"],
+  nav:not(.floating-nav-container) {
+    display: none !important;
+    visibility: hidden !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+  }
+  
+  /* ล็อกโครงสร้างหลักให้เต็มจอพอดี */
+  html, body {
+    width: 100% !important;
+    max-width: 100vw !important;
+    overflow-x: hidden !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  /* ควบคุมระยะห่างขอบซ้ายขวาของหน้าจอหลัก */
+  body {
+    padding-left: var(--spacing-mobile) !important;
+    padding-right: var(--spacing-mobile) !important;
+    padding-bottom: calc(var(--nav-height) + 20px) !important;
+  }
+
+  /* บังคับล้าง Margin และจัดกึ่งกลางคอนเทนต์ทั้งหมด ป้องกันปัญหาตกขอบซ้าย */
+  .app-shell, main, .main-content, 
+  div[class*="container"], div[class*="wrapper"], div[class*="content"], div[class*="flex"] {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    padding-left: 0 !important;
+    padding-right: 0 !important;
+    box-sizing: border-box !important;
+  }
+
+  /* บังคับการ์ด ฟอร์ม และกล่องข้อความให้อยู่ตรงกลางพอดี ไม่เอียงซ้าย */
+  .card, form, div[class*="card"], div[class*="box"], div[class*="p-"] {
+    width: 100% !important;
+    max-width: 100% !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+    box-sizing: border-box !important;
+  }
+
+  /* ป้องกัน Input, Button, Table ล้นจอ */
+  img, video, canvas, svg, table, input, select, button {
+    max-width: 100% !important;
+    height: auto;
+    box-sizing: border-box !important;
+  }
+
+  /* ปรับขนาดหัวข้อให้พอดีกับหน้าจอมือถือ */
+  h1, .text-2xl, .text-3xl {
+    font-size: 1.35rem !important;
+    line-height: 1.3 !important;
+  }
+
+  h2, .text-xl {
+    font-size: 1.15rem !important;
+  }
+}
+
+
+/* ==========================================================
+   4. การตั้งค่าสำหรับคอมพิวเตอร์ Desktop (Screen >= 1024px)
+   ========================================================== */
+@media screen and (min-width: 1024px) {
+  .floating-nav-container {
+    display: none !important;
+  }
+  
+  aside, 
+  .sidebar, 
+  [class*="sidebar"] {
+    display: block !important;
+    visibility: visible !important;
+  }
+
+  body {
+    padding-bottom: 0 !important;
+  }
+}
