@@ -17,7 +17,7 @@ from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 # Import local modules
 from ai import summarize_jobs_with_ai
-from google_sheet import save_to_google_sheets, get_sheet_client, delete_row_from_google_sheets
+from google_sheet import save_to_google_sheets, get_sheet_client, delete_row_from_google_sheets, get_all_summary_jobs
 
 load_dotenv()
 
@@ -410,14 +410,11 @@ def api_status():
 
 @app.route("/api/get_sheets_data", methods=["GET"])
 def api_get_sheets_data():
-    client = get_sheet_client()
-    if not client or not GOOGLE_SPREADSHEET_ID:
+    if not GOOGLE_SPREADSHEET_ID:
         return jsonify({"success": False, "message": "Google Sheets not connected"}), 400
     
     try:
-        spreadsheet = client.open_by_key(GOOGLE_SPREADSHEET_ID)
-        sheet_sum = spreadsheet.worksheet("SUMMARY")
-        rows = sheet_sum.get_all_records()
+        rows = get_all_summary_jobs(GOOGLE_SPREADSHEET_ID)
         return jsonify({"success": True, "data": rows})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
