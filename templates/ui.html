@@ -581,7 +581,9 @@
       
       const summary = job.formatted_summary || `${id}(🥶)${time}/${priceVal}#${carCode}\n${pickupDisp}-${dropoffDisp} ✈️${flightVal}\n${orderVal}`;
       document.getElementById("detail-summary-text").textContent = summary;
-      document.getElementById("original-content").textContent = job.text || job.raw_text || "ดึงข้อมูลจาก Google Sheets เรียบร้อย";
+      
+      // ดึงเฉพาะข้อความต้นฉบับดิบ (Raw Text) มาแสดงผล
+      document.getElementById("original-content").textContent = job.text || job.raw_text || "-";
       document.getElementById("original-content").classList.remove("open");
       showView("detail");
     }
@@ -604,7 +606,7 @@
             car_code: r.car_code || r.Car || r.รถ || "-",
             price: r.price || r.Price || r.ราคา || "-",
             status: "ส่งแล้ว",
-            text: r.formatted_summary || r.text || JSON.stringify(r)
+            text: r.text || r.raw_text || r.formatted_summary || "-"
           }));
 
           renderRecentJobs(sheetJobs);
