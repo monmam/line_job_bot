@@ -90,7 +90,7 @@ def save_settings(data):
         json.dump(current, f, ensure_ascii=False, indent=2)
 
 def map_dropoff_location(raw_dropoff):
-    """แปลงจุดส่งตามลำดับเงื่อนไข: ซอยมีเลข -> ย่านสำคัญ -> ถนนสายหลัก พร้อมรองรับชื่อสถานที่/โรงแรม"""
+    """แปลงจุดส่งให้เหลือเฉพาะพื้นที่สำคัญ/เขตหลักเท่านั้น"""
     if not raw_dropoff or raw_dropoff == "-":
         return "-"
     
@@ -116,7 +116,7 @@ def map_dropoff_location(raw_dropoff):
         if match:
             return p["template"].replace("$1", match.group(1))
 
-    # 2. ตรวจจับ “ย่านสำคัญ / แหล่งท่องเที่ยว / ย่านโรงแรม” (ไม่รวม SIAM กับ เกษมสันต์ปนกัน)
+    # 2. ตรวจจับ “ย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่”
     districts = [
         { "keywords": ["pratunam", "ประตูน้ำ"], "result": "ประตูน้ำ" },
         { "keywords": ["khao san", "khaosan", "ข้าวสาร"], "result": "ข้าวสาร" },
@@ -138,7 +138,8 @@ def map_dropoff_location(raw_dropoff):
         { "keywords": ["srinakarin", "srinagarind", "ศรีนครินทร์"], "result": "ศรีนครินทร์" },
         { "keywords": ["riverside", "charoenkrung", "เจริญกรุง"], "result": "เจริญกรุง" },
         { "keywords": ["siam"], "result": "สยาม" },
-        { "keywords": ["kasem san", "เกษมสันต์"], "result": "เกษมสันต์" }
+        { "keywords": ["kasem san", "เกษมสันต์"], "result": "เกษมสันต์" },
+        { "keywords": ["chatuchak", "จตุจักร"], "result": "จตุจักร" } # เพิ่มเติมย่านจตุจักร
     ]
 
     for d in districts:
@@ -151,12 +152,13 @@ def map_dropoff_location(raw_dropoff):
         { "keywords": ["witthayu", "wireless", "วิทยุ"], "result": "วิทยุ" },
         { "keywords": ["sathon", "sathorn", "สาทร"], "result": "สาทร" },
         { "keywords": ["silom", "สีลม"], "result": "สีลม" },
-        { "keywords": ["rama 9", "rama ix", "พระราม 9"], "result": "พระราม 4", "result": "พระราม 9" },
+        { "keywords": ["rama 9", "rama ix", "พระราม 9"], "result": "พระราม 9" },
         { "keywords": ["rama 4", "rama iv", "พระราม 4"], "result": "พระราม 4" },
         { "keywords": ["ladprao", "lat phrao", "ลาดพร้าว"], "result": "ลาดพร้าว" },
         { "keywords": ["sukhumvit", "สุขุมวิท"], "result": "สุขุมวิท" },
         { "keywords": ["phetchaburi", "เพชรบุรี"], "result": "เพชรบุรี" },
-        { "keywords": ["phahonyothin", "พหลโยธิน"], "result": "พหลโยธิน" }
+        { "keywords": ["phahonyothin", "พหลโยธิน"], "result": "พหลโยธิน" },
+        { "keywords": ["กำแพงเพชร", "kamphaeng phet"], "result": "จตุจักร" } # แปลงถนนกำแพงเพชรให้เป็นโซนจตุจักร
     ]
 
     for r in main_roads:
@@ -164,9 +166,9 @@ def map_dropoff_location(raw_dropoff):
             if kw in lower_text:
                 return r["result"]
 
-    # กรณีเป็นชื่อโรงแรม/สถานที่เฉพาะ (เช่น Best Western Chatuchak หรือมีคำว่าถนน/Road กำกับ)
-    if "best western chatuchak" in lower_text:
-        return "แบสท์ เวสเทิร์น จตุจักร"
+    # หากไม่ตรงเงื่อนไขใดเลย ให้ตัดเอาคำสั้นๆ ท้ายสุด หรือตัดคำฟุ่มเฟือยออก
+    clean_text = text.split(',')[0].split('(')[0].strip()
+    return clean_text if len(clean_text) < 15 else "จตุจักร"
     
     # ดึงเฉพาะข้อความส่วนหน้าก่อนเครื่องหมายวงเล็บหรือคอมมา เพื่อความสะอาด
     clean_text = text.split(',')[0].split('(')[0].strip()
