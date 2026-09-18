@@ -408,6 +408,21 @@ def api_status():
         "settings": settings
     })
 
+@app.route("/callback", methods=['GET', 'POST'])
+def callback():
+    # ถ้าระบบ LINE ส่ง GET มาเช็ค (ตอนกดปุ่ม Verify) ให้ตอบกลับ OK ทันที
+    if request.method == 'GET':
+        return 'OK', 200
+
+    signature = request.headers.get('X-Line-Signature', '')
+    body = request.get_data(as_text=True)
+
+    try:
+        handler.handle(body, signature)
+    except InvalidSignatureError:
+        abort(400)
+    return 'OK'
+
 @app.route("/api/get_sheets_data", methods=["GET"])
 def api_get_sheets_data():
     client = get_sheet_client()
