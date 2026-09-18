@@ -452,50 +452,44 @@ def api_get_sheets_data():
     try:
         spreadsheet = client.open_by_key(GOOGLE_SPREADSHEET_ID)
         
-        # ดึงข้อมูล SUMMARY ปกติ
+        # ดึงข้อมูลจากชีท SUMMARY (หรือชีทหลักที่เก็บข้อมูลสรุป)
         sheet_sum = spreadsheet.worksheet("SUMMARY")
-        sum_rows = sheet_sum.get_all_records()
+        all_values = sheet_sum.get_all_values()
         
-        # ดึงข้อความต้นฉบับจาก RAW_JOBS (คอลัมน์ E หรือ index 4)
-        raw_texts = []
-        try:
-            sheet_raw = spreadsheet.worksheet("RAW_JOBS")
-            raw_values = sheet_raw.get_all_values()
-            for row in raw_values:
-                if len(row) > 4 and row[4].strip() and row[4].strip() != "ข้อความต้นฉบับ" and row[4].strip() != "-":
-                    raw_texts.append(row[4].strip())
-        except Exception as e:
-            print(f"⚠️ ดึง RAW_JOBS ไม่สำเร็จ: {e}")
+        if not all_values or len(all_values) <= 1:
+            return jsonify({"success": True, "data": []})
 
+        headers = all_values[0]
         formatted_rows = []
-        for idx, r in enumerate(sum_rows):
-            # ดึงข้อความจาก RAW_JOBS ตามลำดับแถว
-            raw_text_val = "-"
-            if idx < len(raw_texts):
-                raw_text_val = raw_texts[idx]
-            else:
-                raw_text_val = (
-                    r.get("text") or 
-                    r.get("RawText") or 
-                    r.get("ข้อความต้นฉบับ") or 
-                    r.get("OriginalText") or 
-                    r.get("raw_text") or 
-                    "-"
-                )
 
-            formatted_rows.append({
-                "id": r.get("id") or r.get("ID") or r.get("Job ID", "-"),
-                "date": r.get("date") or r.get("Date") or r.get("วันที่", "-"),
-                "time": r.get("time") or r.get("Time") or r.get("เวลา", "-"),
-                "order": r.get("order") or r.get("Order") or r.get("Order Number", "-"),
-                "text": raw_text_val,
-                "formatted_summary": r.get("formatted_summary") or r.get("Summary", "-")
-            })
+        # วนลูปอ่านข้อมูลทีละแถว (ข้าม Header แถวแรก)
+        for row in all_values[1:]:
+            if not any(row):  # ข้ามแถวว่าง
+                continue
+                
+            # Mapping ตำแหน่งคอลัมน์ตามโครงสร้าง Google Sheets ของคุณ
+            # index 0: วันที่, 1: รหัส (ID), 2: เวลา, 3: จุดรับ, 4: จุดส่ง, 5: เที่ยวบิน, 6: Order, 7: รถ, 8: ราคา, 9: คอลัมน์ J (ข้อความสรุป formatted_summary)
+            row_data = {
+                "date": row[0] if len(row) > 0 else "-",
+                "id": row[1] if len(row) > 1 else "-",
+                "time": row[2] if len(row) > 2 else "-",
+                "pickup": row[3] if len(row) > 3 else "-",
+                "dropoff": row[4] if len(row) > 4 else "-",
+                "flight": row[5] if len(row) > 5 else "-",
+                "order": row[6] if len(row) > 6 else "-",
+                "car_code": row[7] if len(row) > 7 else "-",
+                "price": row[8] if len(row) > 8 else "-",
+                "formatted_summary": row[9] if len(row) > 9 else "-"  # ดึงจากคอลัมน์ J โดยตรง
+            }
+            
+            # ดึงข้อความต้นฉบับเผื่อไว้แสดงผลใน modal หรือช่อง text
+            row_data["text"] = row[4] if len(row) > 4 else "-"
+            
+            formatted_rows.append(row_data)
             
         return jsonify({"success": True, "data": formatted_rows})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
-
 @app.route("/api/add_job", methods=["POST"])
 def api_add_job():
     data = request.get_json() or {}
