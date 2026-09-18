@@ -90,14 +90,25 @@ def save_settings(data):
     if "line_groups" in data:
         current["line_groups"] = data["line_groups"]
 
+    # รองรับการบันทึก Custom Keywords แบบ Dynamic (รับเข้ามาเป็น Dict หรือ List จากหน้าเว็บ)
     if "custom_locations" in data:
-        current["custom_locations"] = data["custom_locations"]
+        if isinstance(data["custom_locations"], list):
+            # แปลงรูปแบบจาก Array ของหน้าบ้าน [{"keyword": "...", "target": "..."}, ...] ให้เป็น Dict
+            new_custom = {}
+            for item in data["custom_locations"]:
+                kw = item.get("keyword", "").strip()
+                tgt = item.get("target", "").strip()
+                if kw and tgt:
+                    new_custom[kw] = tgt
+            current["custom_locations"] = new_custom
+        elif isinstance(data["custom_locations"], dict):
+            current["custom_locations"] = data["custom_locations"]
     
     with open("settings.json", "w", encoding="utf-8") as f:
         json.dump(current, f, ensure_ascii=False, indent=2)
 
 def map_dropoff_location(raw_dropoff):
-    """แปลงจุดส่งให้ชาญฉลาดขึ้น ค้นหาถนนและย่านสำคัญจากทั้งข้อความ"""
+    """แปลงจุดส่งตามหมวดหมู่ที่กำหนด: 1. ซอยที่มีเลข, 2. ย่านสำคัญ/แหล่งท่องเที่ยว/เขต, 3. ถนนสายหลัก"""
     if not raw_dropoff or raw_dropoff == "-":
         return "-"
     
@@ -105,18 +116,14 @@ def map_dropoff_location(raw_dropoff):
     lower_text = text.lower()
     lower_text = re.sub(r'\s+', ' ', lower_text)
 
-    # 0. ตรวจสอบ Custom Locations จาก Settings ก่อน
+    # 0. ตรวจสอบ Custom Locations จาก Settings (ผู้ใช้เพิ่ม/แก้ไขเอง)
     settings = load_settings()
     custom_locs = settings.get("custom_locations", {})
     for keyword, mapped_name in custom_locs.items():
         if keyword.lower() in lower_text:
             return mapped_name
 
-    # 1. ตรวจจับถนนหลักหรือ New Petchaburi เป็นอันดับแรก (เพราะมีความสำคัญสูง)
-    if any(k in lower_text for k in ["new phetchaburi", "new petchaburi", "เพชรบุรีตัดใหม่"]):
-        return "เพชรบุรีตัดใหม่"
-
-    # 2. ตรวจจับ “ซอยที่มีเลข” (สุขุมวิท, พหลโยธิน, เพชรบุรี)
+    # 1. ตรวจจับ “ซอยที่มีเลข” (สุขุมวิท, พหลโยธิน, เพชรบุรี)
     soi_patterns = [
         { "regex": r'(?:sukhumvit|สุขุมวิท).*(?:soi|ซอย)\s*(\d+)', "template": "สุขุมวิท $1" },
         { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:sukhumvit|สุขุมวิท)', "template": "สุขุมวิท $1" },
@@ -132,7 +139,7 @@ def map_dropoff_location(raw_dropoff):
         if match:
             return p["template"].replace("$1", match.group(1))
 
-    # 3. ตรวจจับ “ย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่”
+    # 2. ตรวจจับ “ย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่”
     districts = [
         { "keywords": ["pratunam", "ประตูน้ำ"], "result": "ประตูน้ำ" },
         { "keywords": ["khao san", "khaosan", "ข้าวสาร"], "result": "ข้าวสาร" },
@@ -155,8 +162,7 @@ def map_dropoff_location(raw_dropoff):
         { "keywords": ["riverside", "charoenkrung", "เจริญกรุง"], "result": "เจริญกรุง" },
         { "keywords": ["siam"], "result": "สยาม" },
         { "keywords": ["kasem san", "เกษมสันต์"], "result": "เกษมสันต์" },
-        { "keywords": ["chatuchak", "จตุจักร"], "result": "จตุจักร" },
-        { "keywords": ["c u inn", "cu inn"], "result": "จตุจักร" } # จับโรงแรม C U Inn เป็นจตุจักรตามต้องการ
+        { "keywords": ["chatuchak", "จตุจักร"], "result": "จตุจักร" }
     ]
 
     for d in districts:
@@ -164,8 +170,9 @@ def map_dropoff_location(raw_dropoff):
             if kw in lower_text:
                 return d["result"]
 
-    # 4. ตรวจจับ “ถนนสายหลัก”
+    # 3. ตรวจจับ “ถนนสายหลัก”
     main_roads = [
+        { "keywords": ["new phetchaburi", "เพชรบุรีตัดใหม่"], "result": "เพชรบุรีตัดใหม่" },
         { "keywords": ["witthayu", "wireless", "วิทยุ"], "result": "วิทยุ" },
         { "keywords": ["sathon", "sathorn", "สาทร"], "result": "สาทร" },
         { "keywords": ["silom", "สีลม"], "result": "สีลม" },
@@ -187,29 +194,24 @@ def map_dropoff_location(raw_dropoff):
     return clean_text if len(clean_text) < 15 else "จตุจักร"
 
 def parse_job_text(raw_text, fallback_id="F01"):
-    """แกะข้อมูลใบงาน รองรับจุดรับ จุดส่ง และแปลงค่าอัตโนมัติ"""
     if not raw_text:
         return {}
 
     lines = [line.strip() for line in raw_text.strip().split('\n') if line.strip()]
     
-    # 1. รหัสใบงาน (Job ID)
     id_match = re.search(r'(?:รหัสใบงาน|Job ID|ID)[:\s]*([A-Za-z0-9_-]+)', raw_text, re.IGNORECASE)
     if not id_match and lines:
         id_match = re.search(r'^([A-Za-z0-9_-]+)', lines[0])
     job_id = id_match.group(1).strip() if id_match else fallback_id
 
-    # 2. วันที่ (Date)
     date_match = re.search(r'(?:【(?:日期วันที่|日期|วันที่)】|วันที่|Date)[:\s]*([\d/\-]+)', raw_text, re.IGNORECASE)
     date_val = date_match.group(1).strip() if date_match else "-"
 
-    # 3. เวลา (Time)
     time_match = re.search(r'(?:【(?:时间时间|时间|เวลา)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
     if not time_match:
         time_match = re.search(r'(\d{2}:\d{2})', raw_text)
     time_val = time_match.group(1).strip() if time_match else "-"
 
-    # 4. เที่ยวบิน (Flight)
     flight_val = "-"
     flight_match = re.search(r'(?:【(?:航班flight|航班|flight)】|เที่ยวบิน|flight|Flight)[:\s]*([A-Za-z0-9]+)', raw_text, re.IGNORECASE)
     if not flight_match:
@@ -217,7 +219,6 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if flight_match:
         flight_val = flight_match.group(1).strip()
 
-    # 5. จุดรับ (Pickup)
     pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if pickup_raw_match:
         pickup_raw = pickup_raw_match.group(1).strip()
@@ -238,7 +239,6 @@ def parse_job_text(raw_text, fallback_id="F01"):
     else:
         pickup_mapped = PICKUP_MAP.get(pickup_upper, pickup_raw)
 
-    # 6. จุดส่ง (Dropoff)
     dropoff_raw = "-"
     dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if dropoff_raw_match:
@@ -254,7 +254,6 @@ def parse_job_text(raw_text, fallback_id="F01"):
 
     dropoff_mapped = map_dropoff_location(dropoff_raw)
 
-    # 7. ขนาดรถและราคา (Car & Price)
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if car_raw_match:
         car_raw = car_raw_match.group(1).strip().upper()
@@ -269,7 +268,6 @@ def parse_job_text(raw_text, fallback_id="F01"):
     car_code = car_info["code"]
     price_val = car_info["price"]
 
-    # 8. หมายเลขคำสั่งซื้อ (Order)
     order_match = re.search(r'(?:【(?:客户订单号|订单号|Order)】|Order|Order Number|คำสั่งซื้อ|Order ID)[:\s]*([0-9A-Za-z_-]+)', raw_text, re.IGNORECASE)
     if not order_match:
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
@@ -330,7 +328,6 @@ def add_job_to_queue(text, sender_id=None):
         timer_start_time = time.time()
         timer_thread = threading.Timer(wait_seconds, process_batch_jobs)
         timer_thread.start()
-        print(f"⏱️ เริ่มนับเวลาประมวลผลอีก {wait_seconds} วินาที...")
     return True
 
 def generate_batch_summary():
@@ -363,7 +360,6 @@ def process_batch_jobs():
         if GOOGLE_SPREADSHEET_ID:
             try:
                 save_to_google_sheets(GOOGLE_SPREADSHEET_ID, current_jobs, job_queue)
-                print("✅ บันทึกข้อมูลลง Google Sheets สำเร็จ")
             except Exception as e:
                 print(f"❌ บันทึก Google Sheets ล้มเหลว: {e}")
 
