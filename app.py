@@ -432,6 +432,19 @@ def handle_message(event):
     if source_type == 'group':
         group_id = event.source.group_id
         sender_id = group_id
+        
+        # === เพิ่มส่วนนี้เพื่อให้บอทพิมพ์ Group ID ออกมาเมื่อพิมพ์คำว่า "id" หรือ "กลุ่ม" ===
+        if received_text.strip().lower() in ["id", "กลุ่ม", "ขอไอดีกลุ่ม"]:
+            with ApiClient(configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=f"Group ID ของกลุ่มนี้คือ:\n{group_id}")]
+                    )
+                )
+        # =========================================================================
+
         settings = load_settings()
         existing_ids = [g.get("group_id") for g in settings.get("line_groups", [])]
         if group_id not in existing_ids:
@@ -440,6 +453,7 @@ def handle_message(event):
                 "name": f"Group-{group_id[-4:]}"
             })
             save_settings(settings)
+            
     elif source_type == 'room':
         sender_id = event.source.room_id
     elif source_type == 'user':
