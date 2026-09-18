@@ -93,12 +93,6 @@ def save_settings(data):
         except:
             pass
             
-    if "wait_seconds" in data:
-        try:
-            current["wait_seconds"] = int(data["wait_seconds"])
-        except:
-            pass
-            
     if "line_groups" in data:
         current["line_groups"] = data["line_groups"]
 
@@ -112,6 +106,7 @@ def save_settings(data):
         json.dump(current, f, ensure_ascii=False, indent=2)
 
 def map_dropoff_location(raw_dropoff):
+    """แปลงจุดส่งให้ชาญฉลาดขึ้น ค้นหาถนนและย่านสำคัญจากทั้งข้อความ"""
     if not raw_dropoff or raw_dropoff == "-":
         return "-"
     
@@ -119,6 +114,7 @@ def map_dropoff_location(raw_dropoff):
     lower_text = text.lower()
     lower_text = re.sub(r'\s+', ' ', lower_text)
 
+    # 0. ตรวจสอบ Custom Keywords จาก Settings
     settings = load_settings()
     custom_keywords = settings.get("custom_keywords", [])
     for item in custom_keywords:
@@ -127,14 +123,17 @@ def map_dropoff_location(raw_dropoff):
         if kw and kw in lower_text:
             return zone
 
+    # ตรวจสอบ Custom Locations แบบเดิม
     custom_locs = settings.get("custom_locations", {})
     for keyword, mapped_name in custom_locs.items():
         if keyword.lower() in lower_text:
             return mapped_name
 
+    # 1. ตรวจจับถนนหลักหรือ New Petchaburi เป็นอันดับแรก
     if any(k in lower_text for k in ["new phetchaburi", "new petchaburi", "เพชรบุรีตัดใหม่"]):
         return "เพชรบุรีตัดใหม่"
 
+    # 2. ตรวจจับ “ซอยที่มีเลข”
     soi_patterns = [
         { "regex": r'(?:sukhumvit|สุขุมวิท).*(?:soi|ซอย)\s*(\d+)', "template": "สุขุมวิท $1" },
         { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:sukhumvit|สุขุมวิท)', "template": "สุขุมวิท $1" },
@@ -150,6 +149,7 @@ def map_dropoff_location(raw_dropoff):
         if match:
             return p["template"].replace("$1", match.group(1))
 
+    # 3. ตรวจจับ “ย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่”
     districts = [
         { "keywords": ["pratunam", "ประตูน้ำ"], "result": "ประตูน้ำ" },
         { "keywords": ["khao san", "khaosan", "ข้าวสาร"], "result": "ข้าวสาร" },
@@ -181,28 +181,52 @@ def map_dropoff_location(raw_dropoff):
             if kw in lower_text:
                 return d["result"]
 
+    # 4. ตรวจจับ “ถนนสายหลัก”
+    main_roads = [
+        { "keywords": ["witthayu", "wireless", "วิทยุ"], "result": "วิทยุ" },
+        { "keywords": ["sathon", "sathorn", "สาทร"], "result": "สาทร" },
+        { "keywords": ["silom", "สีลม"], "result": "สีลม" },
+        { "keywords": ["rama 9", "rama ix", "พระราม 9"], "result": "พระราม 9" },
+        { "keywords": ["rama 4", "rama iv", "พระราม 4"], "result": "พระราม 4" },
+        { "keywords": ["ladprao", "lat phrao", "ลาดพร้าว"], "result": "ลาดพร้าว" },
+        { "keywords": ["sukhumvit", "สุขุมวิท"], "result": "สุขุมวิท" },
+        { "keywords": ["phetchaburi", "เพชรบุรี"], "result": "เพชรบุรี" },
+        { "keywords": ["phahonyothin", "พหลโยธิน"], "result": "พหลโยธิน" },
+        { "keywords": ["กำแพงเพชร", "kamphaeng phet"], "result": "จตุจักร" }
+    ]
+
+    for r in main_roads:
+        for kw in r["keywords"]:
+            if kw in lower_text:
+                return r["result"]
+
     clean_text = text.split(',')[0].split('(')[0].strip()
     return clean_text if len(clean_text) < 15 else "จตุจักร"
 
 def parse_job_text(raw_text, fallback_id="F01"):
+    """แกะข้อมูลใบงาน รองรับจุดรับ จุดส่ง และแปลงค่าอัตโนมัติ"""
     if not raw_text:
         return {}
 
     lines = [line.strip() for line in raw_text.strip().split('\n') if line.strip()]
     
+    # 1. รหัสใบงาน (Job ID)
     id_match = re.search(r'(?:รหัสใบงาน|Job ID|ID)[:\s]*([A-Za-z0-9_-]+)', raw_text, re.IGNORECASE)
     if not id_match and lines:
         id_match = re.search(r'^([A-Za-z0-9_-]+)', lines[0])
     job_id = id_match.group(1).strip() if id_match else fallback_id
 
+    # 2. วันที่ (Date)
     date_match = re.search(r'(?:【(?:日期วันที่|日期|วันที่)】|วันที่|Date)[:\s]*([\d/\-]+)', raw_text, re.IGNORECASE)
     date_val = date_match.group(1).strip() if date_match else "-"
 
+    # 3. เวลา (Time)
     time_match = re.search(r'(?:【(?:时间时间|时间|เวลา)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
     if not time_match:
         time_match = re.search(r'(\d{2}:\d{2})', raw_text)
     time_val = time_match.group(1).strip() if time_match else "-"
 
+    # 4. เที่ยวบิน (Flight)
     flight_val = "-"
     flight_match = re.search(r'(?:【(?:航班flight|航班|flight)】|เที่ยวบิน|flight|Flight)[:\s]*([A-Za-z0-9]+)', raw_text, re.IGNORECASE)
     if not flight_match:
@@ -210,6 +234,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if flight_match:
         flight_val = flight_match.group(1).strip()
 
+    # 5. จุดรับ (Pickup)
     pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if pickup_raw_match:
         pickup_raw = pickup_raw_match.group(1).strip()
@@ -230,6 +255,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
     else:
         pickup_mapped = PICKUP_MAP.get(pickup_upper, pickup_raw)
 
+    # 6. จุดส่ง (Dropoff)
     dropoff_raw = "-"
     dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if dropoff_raw_match:
@@ -245,6 +271,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
 
     dropoff_mapped = map_dropoff_location(dropoff_raw)
 
+    # 7. ขนาดรถและราคา (Car & Price)
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if car_raw_match:
         car_raw = car_raw_match.group(1).strip().upper()
@@ -259,6 +286,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
     car_code = car_info["code"]
     price_val = car_info["price"]
 
+    # 8. หมายเลขคำสั่งซื้อ (Order)
     order_match = re.search(r'(?:【(?:客户订单号|订单号|Order)】|Order|Order Number|คำสั่งซื้อ|Order ID)[:\s]*([0-9A-Za-z_-]+)', raw_text, re.IGNORECASE)
     if not order_match:
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
@@ -403,6 +431,7 @@ def handle_message(event):
 
     if source_type == 'group':
         group_id = event.source.group_id
+        
         if received_text.lower() == "id":
             with ApiClient(configuration) as api_client:
                 line_bot_api = MessagingApi(api_client)
@@ -415,32 +444,29 @@ def handle_message(event):
             return
 
     required_keywords = [
-        "（接机รับ）", "【日期วันที่】", "【เวลาเวลา】", "【航班flight】",
-        "【人数จำนวนคน】", "【行李กระเป๋า】", "【接รับ】", "【ส่งส่ง】",
-        "【车型ขนาดรถ】", "【姓名ชื่อ】", "【电话เบอร์โทร】", "【客户订单号】",
-        "【接驳编码code】", "【备注หมายเหต】"
+        "（接机รับ）",
+        "【日期วันที่】",
+        "【เวลาเวลา】",
+        "【航班flight】",
+        "【人数จำนวนคน】",
+        "【行李กระเป๋า】",
+        "【接รับ】",
+        "【ส่งส่ง】",
+        "【车型ขนาดรถ】",
+        "【姓名ชื่อ】",
+        "【电话เบอร์โทร】",
+        "【客户订单号】",
+        "【接驳编码code】",
+        "【备注หมายเหต】"
     ]
     
-is_valid_form = all(keyword in received_text for keyword in required_keywords)
+    is_valid_form = all(keyword in received_text for keyword in required_keywords)
 
     if not is_valid_form:
-        # ตอบกลับเตือนในแชทส่วนตัวว่าฟอร์มไม่ถูกต้อง
-        if user_id:
-            try:
-                with ApiClient(configuration) as api_client:
-                    line_bot_api = MessagingApi(api_client)
-                    line_bot_api.push_message(
-                        PushMessageRequest(
-                            to=user_id,
-                            messages=[TextMessage(text="⚠️ รูปแบบใบงานไม่ถูกต้อง ขาดหัวข้อบังคับบางรายการ กรุณาตรวจสอบฟอร์มใหม่อีกครั้ง")]
-                        )
-                    )
-            except Exception as e:
-                print(f"Error sending warning: {e}")
-        return
+        return  
 
     settings = load_settings()
-    connected_groups = settings.get("line_groups", [])
+    connected_groups = settings.get("line_groups", []) 
 
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
@@ -468,7 +494,7 @@ is_valid_form = all(keyword in received_text for keyword in required_keywords)
                 print(f"Reply error: {e}")
 
         for group in connected_groups:
-            g_id = group.get("group_id")
+            g_id = group.get("group_id") 
             if g_id:
                 try:
                     line_bot_api.push_message(
@@ -518,6 +544,7 @@ def api_system_health():
             with ApiClient(configuration) as api_client:
                 line_connected = True
         except Exception as e:
+            print(f"LINE Bot check error: {e}")
             line_connected = False
 
     if GOOGLE_SPREADSHEET_ID:
@@ -527,6 +554,7 @@ def api_system_health():
                 client.open_by_key(GOOGLE_SPREADSHEET_ID)
                 sheets_connected = True
         except Exception as e:
+            print(f"Google Sheets check error: {e}")
             sheets_connected = False
 
     return jsonify({
