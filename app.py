@@ -292,7 +292,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
         "formatted_summary": formatted_summary
     }
 
-def add_job_to_queue(text, sender_id=None):
+def def add_job_to_queue(text, sender_id=None):
     global job_queue, timer_thread, timer_start_time, latest_jobs, last_sender_id
 
     now_str = datetime.datetime.now().strftime("%H:%M:%S")
@@ -305,10 +305,13 @@ def add_job_to_queue(text, sender_id=None):
         "date": parsed_info["date"] if parsed_info["date"] != "-" else datetime.datetime.now().strftime("%d/%m/%Y"),
         "text": text,
         "time": parsed_info["time"] if parsed_info["time"] != "-" else now_str,
-        "pickup": parsed_info["pickup_raw"],        
+        
+        # --- จุดที่แก้ไข: ให้ใช้ค่าที่แมปแล้ว (parsed_info["pickup"] / dropoff) สำหรับแสดงผลใน UI ---
+        "pickup": parsed_info["pickup"],          # เปลี่ยนจาก pickup_raw เป็น pickup (เช่น แอร์ดอน, แอร์สุ)
         "pickup_display": parsed_info["pickup"],    
-        "dropoff": parsed_info["dropoff_raw"],      
+        "dropoff": parsed_info["dropoff"],        # เปลี่ยนจาก dropoff_raw เป็น dropoff (เช่น สยาม, จตุจักร, เพชรบุรีตัดใหม่)
         "dropoff_display": parsed_info["dropoff"],  
+        
         "flight": parsed_info["flight"],
         "order": parsed_info["order"],
         "car_code": parsed_info["car_code"],
