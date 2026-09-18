@@ -305,13 +305,10 @@ def add_job_to_queue(text, sender_id=None):
         "date": parsed_info["date"] if parsed_info["date"] != "-" else datetime.datetime.now().strftime("%d/%m/%Y"),
         "text": text,
         "time": parsed_info["time"] if parsed_info["time"] != "-" else now_str,
-        
-        # --- จุดที่แก้ไข: ให้ใช้ค่าที่แมปแล้ว (parsed_info["pickup"] / dropoff) สำหรับแสดงผลใน UI ---
-        "pickup": parsed_info["pickup"],          # เปลี่ยนจาก pickup_raw เป็น pickup (เช่น แอร์ดอน, แอร์สุ)
+        "pickup": parsed_info["pickup"],          # ใช้ค่าที่แมปแล้วเพื่อให้ UI แสดงผลเหมือน LINE
         "pickup_display": parsed_info["pickup"],    
-        "dropoff": parsed_info["dropoff"],        # เปลี่ยนจาก dropoff_raw เป็น dropoff (เช่น สยาม, จตุจักร, เพชรบุรีตัดใหม่)
+        "dropoff": parsed_info["dropoff"],        # ใช้ค่าที่แมปแล้วเพื่อให้ UI แสดงผลเหมือน LINE
         "dropoff_display": parsed_info["dropoff"],  
-        
         "flight": parsed_info["flight"],
         "order": parsed_info["order"],
         "car_code": parsed_info["car_code"],
