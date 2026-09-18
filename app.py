@@ -463,7 +463,7 @@ def handle_message(event):
 
 @app.route("/")
 def index():
-    return render_template("ui_5.html")
+    return render_template("ui.html")
 
 @app.route("/api/status", methods=["GET"])
 def api_status():
