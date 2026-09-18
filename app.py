@@ -443,28 +443,18 @@ def handle_message(event):
                 )
             return
 
+# เปลี่ยนมาเช็คเฉพาะคีย์เวิร์ดหลักๆ ที่มั่นใจว่ามีแน่ๆ ในใบงาน
     required_keywords = [
-        "（接机รับ）",
-        "【日期วันที่】",
-        "【เวลาเวลา】",
-        "【航班flight】",
-        "【人数จำนวนคน】",
-        "【行李กระเป๋า】",
         "【接รับ】",
         "【ส่งส่ง】",
-        "【车型ขนาดรถ】",
-        "【姓名ชื่อ】",
-        "【电话เบอร์โทร】",
-        "【客户订单号】",
-        "【接驳编码code】",
-        "【备注หมายเหต】"
+        "【客户订单号】"
     ]
     
     is_valid_form = all(keyword in received_text for keyword in required_keywords)
 
     if not is_valid_form:
-        return  
-
+        return  # ถ้าไม่มีคีย์เวิร์ดหลักเหล่านี้ ถึงจะข้ามไป
+        
     settings = load_settings()
     connected_groups = settings.get("line_groups", []) 
 
