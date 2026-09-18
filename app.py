@@ -430,65 +430,17 @@ def handle_message(event):
     source_type = event.source.type
     user_id = event.source.user_id if hasattr(event.source, 'user_id') else None
 
-    # กำหนดรหัสผ่านลับสำหรับเชื่อมต่อกลุ่ม (คุณสามารถเปลี่ยนคำว่า "mysecret123" เป็นรหัสของคุณเองได้เลยครับ)
-    CONNECT_SECRET_CODE = "mysecret123"
-
-    # 1. จัดการคำสั่งในกลุ่ม
+    # 1. หากพิมพ์คำว่า "id" ในกลุ่ม ให้บอทตอบกลับด้วย Group ID ของกลุ่มนั้นทันที
     if source_type == 'group':
         group_id = event.source.group_id
         
-        # กรณีพิมพ์ขอ ID เพื่อดูเฉยๆ (ใครพิมพ์ก็ดูได้ แต่ยังไม่เชื่อมต่อ)
         if received_text.lower() == "id":
             with ApiClient(configuration) as api_client:
                 line_bot_api = MessagingApi(api_client)
                 line_bot_api.reply_message(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
-                        messages=[TextMessage(text=f"📌 Group ID ของกลุ่มนี้คือ:\n{group_id}\n\n(หากต้องการเชื่อมต่อกลุ่มนี้ให้พิมพ์: id {CONNECT_SECRET_CODE}")]
-                    )
-                )
-            return
-
-        # กรณีพิมพ์เชื่อมต่อพร้อมรหัสผ่าน (เช่น "id mysecret123") ป้องกันคนอื่นพิมพ์มั่ว
-        elif received_text.lower().startswith("id "):
-            input_code = received_text[3:].strip()
-            
-            if input_code == CONNECT_SECRET_CODE:
-                settings = load_settings()
-                existing_groups = settings.get("line_groups", [])
-                
-                # บันทึกกลุ่มเฉพาะเมื่อใส่รหัสถูกต้อง
-                if not any(g.get("group_id") == group_id for g in existing_groups):
-                    existing_groups.append({"group_id": group_id, "name": f"Group-{group_id[-4:]}"})
-                
-                settings["line_groups"] = existing_groups
-                save_settings(settings)
-                
-                reply_text = f"✅ ยืนยันรหัสถูกต้อง! เชื่อมต่อกลุ่มนี้สำเร็จ\nGroup ID: {group_id}"
-            else:
-                reply_text = "❌ รหัสผ่านเชื่อมต่อกลุ่มไม่ถูกต้อง!"
-
-            with ApiClient(configuration) as api_client:
-                line_bot_api = MessagingApi(api_client)
-                line_bot_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[TextMessage(text=reply_text)]
-                    )
-                )
-            return
-
-        # ตรวจสอบรายชื่อกลุ่มที่เชื่อมต่ออยู่
-        elif received_text.lower() == "check_groups":
-            settings = load_settings()
-            groups = settings.get("line_groups", [])
-            group_list_text = "\n".join([f"- {g.get('name')} ({g.get('group_id')})" for g in groups]) if groups else "ยังไม่มีกลุ่มที่เชื่อมต่อ"
-            
-            with ApiClient(configuration) as api_client:
-                line_bot_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[TextMessage(text=f"📋 รายชื่อกลุ่มที่เชื่อมต่ออยู่:\n{group_list_text}")]
+                        messages=[TextMessage(text=f"{group_id}")]
                     )
                 )
             return
@@ -514,16 +466,16 @@ def handle_message(event):
     is_valid_form = all(keyword in received_text for keyword in required_keywords)
 
     if not is_valid_form:
-        return  # ถ้าไม่ใช่ฟอร์มและไม่ใช่คำสั่ง ให้ข้ามไปเลย
+        return  # ถ้าไม่ใช่ฟอร์มและไม่ใช่คำว่า id ให้ข้ามไปเลย
 
-    # 3. ขั้นตอนการทำงานหลังตรวจสอบฟอร์มผ่าน (ส่งใบสรุปเข้าแชทส่วนตัวคุณ + ส่งเข้ากลุ่มที่เชื่อมต่อ)
+    # 3. เมื่อมีฟอร์มที่ถูกต้องส่งเข้ามา:
     settings = load_settings()
-    connected_groups = settings.get("line_groups", [])
+    connected_groups = settings.get("line_groups", []) # ดึงกลุ่มที่คุณตั้งค่าไว้ในหน้าเว็บ Settings
 
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
         
-        # 3.1 ส่ง "ใบสรุปงาน" กลับมาหาคุณในแชทส่วนตัว (OA) ทันทีที่สรุปเสร็จ
+        # 3.1 ส่ง "ใบสรุปงาน" กลับมาหาคุณในแชทส่วนตัว (OA) ทันที
         if user_id:
             try:
                 line_bot_api.push_message(
@@ -547,9 +499,9 @@ def handle_message(event):
             except Exception as e:
                 print(f"Reply error: {e}")
 
-        # 3.2 ส่งใบสรุปงานไปยังกลุ่มที่เชื่อมต่อไว้ทั้งหมดโดยอัตโนมัติ
+        # 3.2 ส่งใบสรุปงานไปยังกลุ่มที่คุณบันทึกไว้ในหน้า Settings โดยอัตโนมัติ
         for group in connected_groups:
-            g_id = group.get("group_id")
+            g_id = group.get("group_id") # ดึง Group ID จากช่องที่คุณกรอกไว้ในหน้าเว็บ
             if g_id:
                 try:
                     line_bot_api.push_message(
@@ -563,6 +515,7 @@ def handle_message(event):
 
     # ส่งเข้าคิวระบบหลังบ้าน
     add_job_to_queue(received_text, sender_id=user_id)
+    
 @app.route("/")
 def index():
     return render_template("ui.html")
