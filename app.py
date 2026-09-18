@@ -139,7 +139,7 @@ def map_dropoff_location(raw_dropoff):
         { "keywords": ["riverside", "charoenkrung", "เจริญกรุง"], "result": "เจริญกรุง" },
         { "keywords": ["siam"], "result": "สยาม" },
         { "keywords": ["kasem san", "เกษมสันต์"], "result": "เกษมสันต์" },
-        { "keywords": ["chatuchak", "จตุจักร"], "result": "จตุจักร" }
+        { "keywords": ["chatuchak", "จตุจักร"], "result": "จตุจักร" } # เพิ่มเติมย่านจตุจักร
     ]
 
     for d in districts:
@@ -158,7 +158,7 @@ def map_dropoff_location(raw_dropoff):
         { "keywords": ["sukhumvit", "สุขุมวิท"], "result": "สุขุมวิท" },
         { "keywords": ["phetchaburi", "เพชรบุรี"], "result": "เพชรบุรี" },
         { "keywords": ["phahonyothin", "พหลโยธิน"], "result": "พหลโยธิน" },
-        { "keywords": ["กำแพงเพชร", "kamphaeng phet"], "result": "จตุจักร" }
+        { "keywords": ["กำแพงเพชร", "kamphaeng phet"], "result": "จตุจักร" } # แปลงถนนกำแพงเพชรให้เป็นโซนจตุจักร
     ]
 
     for r in main_roads:
@@ -166,8 +166,13 @@ def map_dropoff_location(raw_dropoff):
             if kw in lower_text:
                 return r["result"]
 
+    # หากไม่ตรงเงื่อนไขใดเลย ให้ตัดเอาคำสั้นๆ ท้ายสุด หรือตัดคำฟุ่มเฟือยออก
     clean_text = text.split(',')[0].split('(')[0].strip()
     return clean_text if len(clean_text) < 15 else "จตุจักร"
+    
+    # ดึงเฉพาะข้อความส่วนหน้าก่อนเครื่องหมายวงเล็บหรือคอมมา เพื่อความสะอาด
+    clean_text = text.split(',')[0].split('(')[0].strip()
+    return clean_text if len(clean_text) < 35 else clean_text[:35] + "..."
 
 def parse_job_text(raw_text, fallback_id="F01"):
     """แกะข้อมูลใบงาน รองรับจุดรับ จุดส่ง และแปลงค่าอัตโนมัติ"""
@@ -176,19 +181,23 @@ def parse_job_text(raw_text, fallback_id="F01"):
 
     lines = [line.strip() for line in raw_text.strip().split('\n') if line.strip()]
     
+    # 1. รหัสใบงาน (Job ID)
     id_match = re.search(r'(?:รหัสใบงาน|Job ID|ID)[:\s]*([A-Za-z0-9_-]+)', raw_text, re.IGNORECASE)
     if not id_match and lines:
         id_match = re.search(r'^([A-Za-z0-9_-]+)', lines[0])
     job_id = id_match.group(1).strip() if id_match else fallback_id
 
+    # 2. วันที่ (Date)
     date_match = re.search(r'(?:【(?:日期วันที่|日期|วันที่)】|วันที่|Date)[:\s]*([\d/\-]+)', raw_text, re.IGNORECASE)
     date_val = date_match.group(1).strip() if date_match else "-"
 
-    time_match = re.search(r'(?:【(?:เวลา|时间时间|时间|เวลา)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
+    # 3. เวลา (Time)
+    time_match = re.search(r'(?:【(?:时间时间|时间|เวลา)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
     if not time_match:
         time_match = re.search(r'(\d{2}:\d{2})', raw_text)
     time_val = time_match.group(1).strip() if time_match else "-"
 
+    # 4. เที่ยวบิน (Flight)
     flight_val = "-"
     flight_match = re.search(r'(?:【(?:航班flight|航班|flight)】|เที่ยวบิน|flight|Flight)[:\s]*([A-Za-z0-9]+)', raw_text, re.IGNORECASE)
     if not flight_match:
@@ -196,6 +205,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if flight_match:
         flight_val = flight_match.group(1).strip()
 
+    # 5. จุดรับ (Pickup)
     pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if pickup_raw_match:
         pickup_raw = pickup_raw_match.group(1).strip()
@@ -216,10 +226,12 @@ def parse_job_text(raw_text, fallback_id="F01"):
     else:
         pickup_mapped = PICKUP_MAP.get(pickup_upper, pickup_raw)
 
+    # 6. จุดส่ง (Dropoff)
     dropoff_raw = "-"
     dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if dropoff_raw_match:
         dropoff_raw = dropoff_raw_match.group(1).strip()
+        # ตัดวงเล็บพิกัดท้ายข้อความออก
         dropoff_raw = re.sub(r'[\),].*$', '', dropoff_raw).strip()
     else:
         for line in lines:
@@ -231,6 +243,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
 
     dropoff_mapped = map_dropoff_location(dropoff_raw)
 
+    # 7. ขนาดรถและราคา (Car & Price)
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if car_raw_match:
         car_raw = car_raw_match.group(1).strip().upper()
@@ -245,6 +258,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
     car_code = car_info["code"]
     price_val = car_info["price"]
 
+    # 8. หมายเลขคำสั่งซื้อ (Order)
     order_match = re.search(r'(?:【(?:客户订单号|订单号|Order)】|Order|Order Number|คำสั่งซื้อ|Order ID)[:\s]*([0-9A-Za-z_-]+)', raw_text, re.IGNORECASE)
     if not order_match:
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
@@ -278,7 +292,7 @@ def add_job_to_queue(text, sender_id=None):
     job_item = {
         "id": parsed_info["id"],
         "date": parsed_info["date"] if parsed_info["date"] != "-" else datetime.datetime.now().strftime("%d/%m/%Y"),
-        "text": text,  # เก็บข้อความต้นฉบับดิบตรงนี้
+        "text": text,  # <-- ตรงนี้เก็บ "ข้อความต้นฉบับดิบ" ที่ส่งเข้ามาตรงๆ เลย
         "time": parsed_info["time"] if parsed_info["time"] != "-" else now_str,
         "pickup": parsed_info["pickup_raw"],        
         "pickup_display": parsed_info["pickup"],    
@@ -309,6 +323,7 @@ def add_job_to_queue(text, sender_id=None):
     return True
 
 def generate_batch_summary():
+    """สร้างข้อความสรุปพร้อมเว้นบรรทัดระหว่างรายการตามที่อัปเดต"""
     if not job_queue:
         return ""
 
@@ -319,7 +334,7 @@ def generate_batch_summary():
         for i, job in enumerate(job_queue):
             lines.append(job["formatted_summary"])
             if i < len(job_queue) - 1:
-                lines.append("")
+                lines.append("") # เว้นบรรทัดระหว่างรายการ
         return "\n".join(lines)
     else:
         return f"📅 {first_date}\n\n{job_queue[0]['formatted_summary']}"
@@ -335,10 +350,11 @@ def process_batch_jobs():
     current_jobs = [job["text"] for job in job_queue]
 
     if summary_text:
+        # บันทึกข้อมูลลง Google Sheets ทั้ง RAW_JOBS และ SUMMARY ตามโมดูลที่ตั้งค่าไว้
         if GOOGLE_SPREADSHEET_ID:
             try:
                 save_to_google_sheets(GOOGLE_SPREADSHEET_ID, current_jobs, job_queue)
-                print("✅ บันทึกข้อมูลลง Google Sheets สำเร็จ")
+                print("✅ บันทึกข้อมูลลง Google Sheets (RAW_JOBS / SUMMARY) สำเร็จ")
             except Exception as e:
                 print(f"❌ บันทึก Google Sheets ล้มเหลว: {e}")
 
@@ -451,45 +467,12 @@ def api_get_sheets_data():
     
     try:
         spreadsheet = client.open_by_key(GOOGLE_SPREADSHEET_ID)
-        
-        # ดึงข้อมูลจากชีท SUMMARY (หรือชีทหลักที่เก็บข้อมูลสรุป)
         sheet_sum = spreadsheet.worksheet("SUMMARY")
-        all_values = sheet_sum.get_all_values()
-        
-        if not all_values or len(all_values) <= 1:
-            return jsonify({"success": True, "data": []})
-
-        headers = all_values[0]
-        formatted_rows = []
-
-        # วนลูปอ่านข้อมูลทีละแถว (ข้าม Header แถวแรก)
-        for row in all_values[1:]:
-            if not any(row):  # ข้ามแถวว่าง
-                continue
-                
-            # Mapping ตำแหน่งคอลัมน์ตามโครงสร้าง Google Sheets ของคุณ
-            # index 0: วันที่, 1: รหัส (ID), 2: เวลา, 3: จุดรับ, 4: จุดส่ง, 5: เที่ยวบิน, 6: Order, 7: รถ, 8: ราคา, 9: คอลัมน์ J (ข้อความสรุป formatted_summary)
-            row_data = {
-                "date": row[0] if len(row) > 0 else "-",
-                "id": row[1] if len(row) > 1 else "-",
-                "time": row[2] if len(row) > 2 else "-",
-                "pickup": row[3] if len(row) > 3 else "-",
-                "dropoff": row[4] if len(row) > 4 else "-",
-                "flight": row[5] if len(row) > 5 else "-",
-                "order": row[6] if len(row) > 6 else "-",
-                "car_code": row[7] if len(row) > 7 else "-",
-                "price": row[8] if len(row) > 8 else "-",
-                "formatted_summary": row[9] if len(row) > 9 else "-"  # ดึงจากคอลัมน์ J โดยตรง
-            }
-            
-            # ดึงข้อความต้นฉบับเผื่อไว้แสดงผลใน modal หรือช่อง text
-            row_data["text"] = row[4] if len(row) > 4 else "-"
-            
-            formatted_rows.append(row_data)
-            
-        return jsonify({"success": True, "data": formatted_rows})
+        rows = sheet_sum.get_all_records()
+        return jsonify({"success": True, "data": rows})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+
 @app.route("/api/add_job", methods=["POST"])
 def api_add_job():
     data = request.get_json() or {}
