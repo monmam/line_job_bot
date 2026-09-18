@@ -5,6 +5,7 @@ import time
 import threading
 import datetime
 from flask import Flask, request, abort, render_template, jsonify, redirect, url_for
+from linebot.v3.messaging import TextMessage, ReplyMessageRequest
 from dotenv import load_dotenv
 
 # Import LINE SDK (v3)
