@@ -426,7 +426,7 @@ def process_batch_jobs():
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    received_text = event.message.text
+    received_text = event.message.text.strip()
     source_type = event.source.type
     sender_id = None
 
@@ -434,7 +434,26 @@ def handle_message(event):
         group_id = event.source.group_id
         sender_id = group_id
         
-        # --- ตรวจสอบว่ามีคำสำคัญทั้งหมดครบถ้วนตามฟอร์มที่คุณระบุหรือไม่ ---
+        # --- เพิ่มเงื่อนไข: ถ้าพิมพ์คำว่า "id" ในกลุ่ม ให้บอทตอบกลับ Group ID ทันที ---
+        if received_text.lower() == "id":
+            # บันทึกกลุ่มนี้ลงในตั้งค่าอัตโนมัติว่าเป็นกลุ่มเป้าหมาย
+            settings = load_settings()
+            settings["target_job_group_id"] = group_id  # บันทึกเป็นกลุ่มสำหรับส่งใบงานสรุป
+            save_settings(settings)
+            
+            # ส่งข้อความตอบกลับบอก ID ของกลุ่มนี้
+            with ApiClient(configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=f"เชื่อมต่อกลุ่มนี้สำเร็จ!\nGroup ID ของคุณคือ:\n{group_id}")]
+                    )
+                )
+            return
+        # -------------------------------------------------------------
+
+        # --- ตรวจสอบรูปแบบฟอร์มใบงาน ---
         required_keywords = [
             "（接机รับ）",
             "【日期วันที่】",
@@ -452,31 +471,17 @@ def handle_message(event):
             "【备注หมายเหต】"
         ]
         
-        # เช็คว่าข้อความที่ส่งเข้ามา มีคำสำคัญครบทุกคำหรือไม่
         is_valid_form = all(keyword in received_text for keyword in required_keywords)
 
         if not is_valid_form:
-            # ถ้ามีคำใดคำหนึ่งขาดหายไป (เช่น แชทคุยเล่นทั่วไป หรือฟอร์มไม่ครบ) 
-            # บอทจะตัดจบการทำงานทันทีโดยไม่ตอบอะไรและไม่บันทึก
-            return 
-        # ------------------------------------------------
-
-        # ถ้าส่งฟอร์มมาถูกต้องครบถ้วน ระบบจะบันทึก Group ID ลง settings อัตโนมัติ (ถ้ายังไม่มี)
-        settings = load_settings()
-        existing_ids = [g.get("group_id") for g in settings.get("line_groups", [])]
-        if group_id not in existing_ids:
-            settings.setdefault("line_groups", []).append({
-                "group_id": group_id,
-                "name": f"Group-{group_id[-4:]}"
-            })
-            save_settings(settings)
+            return  # ถ้าไม่ใช่ฟอร์มและไม่ใช่คำว่า "id" บอทจะไม่ตอบอะไรเลย
             
     elif source_type == 'room':
         sender_id = event.source.room_id
     elif source_type == 'user':
         sender_id = event.source.user_id
 
-    # ส่งเข้าคิวประมวลผลเฉพาะข้อความที่เป็นฟอร์มถูกต้องครบทุกหัวข้อเท่านั้น
+    # ส่งเข้าคิวประมวลผลเมื่อเป็นฟอร์มที่ถูกต้อง
     add_job_to_queue(received_text, sender_id=sender_id)
 
 @app.route("/")
