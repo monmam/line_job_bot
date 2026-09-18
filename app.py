@@ -56,25 +56,29 @@ CAR_PRICING_MAP = {
 }
 
 def load_settings():
+    default_settings = {
+        "wait_seconds": 120,
+        "line_groups": [],
+        "custom_locations": {
+            "metropole": "เพชรบุรีตัดใหม่",
+            "c u inn": "จตุจักร"
+        }
+    }
     if os.path.exists("settings.json"):
         with open("settings.json", "r", encoding="utf-8") as f:
             try:
                 data = json.load(f)
                 if "wait_seconds" not in data:
                     data["wait_seconds"] = 120
+                if "custom_locations" not in data:
+                    data["custom_locations"] = default_settings["custom_locations"]
                 return data
             except:
                 pass
-    return {"wait_seconds": 120, "line_groups": []}
+    return default_settings
 
 def save_settings(data):
-    current = {"wait_seconds": 120, "line_groups": []}
-    if os.path.exists("settings.json"):
-        with open("settings.json", "r", encoding="utf-8") as f:
-            try:
-                current = json.load(f)
-            except:
-                pass
+    current = load_settings()
                 
     if "waiting_time" in data:
         try:
@@ -85,12 +89,15 @@ def save_settings(data):
             
     if "line_groups" in data:
         current["line_groups"] = data["line_groups"]
+
+    if "custom_locations" in data:
+        current["custom_locations"] = data["custom_locations"]
     
     with open("settings.json", "w", encoding="utf-8") as f:
         json.dump(current, f, ensure_ascii=False, indent=2)
 
 def map_dropoff_location(raw_dropoff):
-    """แปลงจุดส่งให้เหลือเฉพาะพื้นที่สำคัญ/เขตหลักเท่านั้น"""
+    """แปลงจุดส่งให้ชาญฉลาดขึ้น ค้นหาถนนและย่านสำคัญจากทั้งข้อความ"""
     if not raw_dropoff or raw_dropoff == "-":
         return "-"
     
@@ -98,21 +105,26 @@ def map_dropoff_location(raw_dropoff):
     lower_text = text.lower()
     lower_text = re.sub(r'\s+', ' ', lower_text)
 
-    # 0. ตรวจจับ New Petchaburi / เพชรบุรีตัดใหม่ เป็นกรณีพิเศษ
-    if "new phetchaburi" in lower_text or "new petchaburi" in lower_text or "เพชรบุรีตัดใหม่" in lower_text:
+    # 0. ตรวจสอบ Custom Locations จาก Settings ก่อน
+    settings = load_settings()
+    custom_locs = settings.get("custom_locations", {})
+    for keyword, mapped_name in custom_locs.items():
+        if keyword.lower() in lower_text:
+            return mapped_name
+
+    # 1. ตรวจจับถนนหลักหรือ New Petchaburi เป็นอันดับแรก (เพราะมีความสำคัญสูง)
+    if any(k in lower_text for k in ["new phetchaburi", "new petchaburi", "เพชรบุรีตัดใหม่"]):
         return "เพชรบุรีตัดใหม่"
 
-    # 1. ตรวจจับ “ซอยที่มีเลข” (สุขุมวิท, พหลโยธิน, เพชรบุรี)
+    # 2. ตรวจจับ “ซอยที่มีเลข” (สุขุมวิท, พหลโยธิน, เพชรบุรี)
     soi_patterns = [
         { "regex": r'(?:sukhumvit|สุขุมวิท).*(?:soi|ซอย)\s*(\d+)', "template": "สุขุมวิท $1" },
         { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:sukhumvit|สุขุมวิท)', "template": "สุขุมวิท $1" },
         { "regex": r'(?:sukhumvit|สุขุมวิท)\s*[-]?\s*(\d+)', "template": "สุขุมวิท $1" },
         { "regex": r'(?:phahonyothin|พหลโยธิน).*(?:soi|ซอย)\s*(\d+)', "template": "พหลโยธิน $1" },
         { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:phahonyothin|พหลโยธิน)', "template": "พหลโยธิน $1" },
-        { "regex": r'(?:phahonyothin|พหลโยธิน)\s*[-]?\s*(\d+)', "template": "พหลโยธิน $1" },
         { "regex": r'(?:phetchaburi|เพชรบุรี).*(?:soi|ซอย)\s*(\d+)', "template": "เพชรบุรี $1" },
-        { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:phetchaburi|เพชรบุรี)', "template": "เพชรบุรี $1" },
-        { "regex": r'(?:phetchaburi|เพชรบุรี)\s*[-]?\s*(\d+)', "template": "เพชรบุรี $1" }
+        { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:phetchaburi|เพชรบุรี)', "template": "เพชรบุรี $1" }
     ]
 
     for p in soi_patterns:
@@ -120,7 +132,7 @@ def map_dropoff_location(raw_dropoff):
         if match:
             return p["template"].replace("$1", match.group(1))
 
-    # 2. ตรวจจับ “ย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่”
+    # 3. ตรวจจับ “ย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่”
     districts = [
         { "keywords": ["pratunam", "ประตูน้ำ"], "result": "ประตูน้ำ" },
         { "keywords": ["khao san", "khaosan", "ข้าวสาร"], "result": "ข้าวสาร" },
@@ -143,7 +155,8 @@ def map_dropoff_location(raw_dropoff):
         { "keywords": ["riverside", "charoenkrung", "เจริญกรุง"], "result": "เจริญกรุง" },
         { "keywords": ["siam"], "result": "สยาม" },
         { "keywords": ["kasem san", "เกษมสันต์"], "result": "เกษมสันต์" },
-        { "keywords": ["chatuchak", "จตุจักร"], "result": "จตุจักร" }
+        { "keywords": ["chatuchak", "จตุจักร"], "result": "จตุจักร" },
+        { "keywords": ["c u inn", "cu inn"], "result": "จตุจักร" } # จับโรงแรม C U Inn เป็นจตุจักรตามต้องการ
     ]
 
     for d in districts:
@@ -151,7 +164,7 @@ def map_dropoff_location(raw_dropoff):
             if kw in lower_text:
                 return d["result"]
 
-    # 3. ตรวจจับ “ถนนสายหลัก”
+    # 4. ตรวจจับ “ถนนสายหลัก”
     main_roads = [
         { "keywords": ["witthayu", "wireless", "วิทยุ"], "result": "วิทยุ" },
         { "keywords": ["sathon", "sathorn", "สาทร"], "result": "สาทร" },
@@ -290,7 +303,7 @@ def add_job_to_queue(text, sender_id=None):
     job_item = {
         "id": parsed_info["id"],
         "date": parsed_info["date"] if parsed_info["date"] != "-" else datetime.datetime.now().strftime("%d/%m/%Y"),
-        "text": text,  # <-- บันทึกข้อความต้นฉบับดิบที่ส่งเข้ามาจริงๆ เต็มข้อความ
+        "text": text,
         "time": parsed_info["time"] if parsed_info["time"] != "-" else now_str,
         "pickup": parsed_info["pickup_raw"],        
         "pickup_display": parsed_info["pickup"],    
@@ -321,7 +334,6 @@ def add_job_to_queue(text, sender_id=None):
     return True
 
 def generate_batch_summary():
-    """สร้างข้อความสรุปพร้อมเว้นบรรทัดระหว่างรายการตามที่อัปเดต"""
     if not job_queue:
         return ""
 
