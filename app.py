@@ -433,19 +433,22 @@ def handle_message(event):
         group_id = event.source.group_id
         sender_id = group_id
         
-        # === เพิ่มส่วนนี้เพื่อให้บอทพิมพ์ Group ID ออกมาเมื่อพิมพ์คำว่า "id" หรือ "กลุ่ม" ===
-        if received_text.strip().lower() in ["id", "กลุ่ม", "ขอไอดีกลุ่ม"]:
-            with ApiClient(configuration) as api_client:
-                line_bot_api = MessagingApi(api_client)
-                line_bot_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[TextMessage(text=f"Group ID ของกลุ่มนี้คือ:\n{group_id}")]
-                    )
-                )
-        # =========================================================================
-
+        # 1. ตรวจสอบว่ากลุ่มนี้ถูกบันทึก/เปิดใช้งานใน settings แล้วหรือยัง (ถ้าต้องการให้บล็อกกลุ่มที่ยังไม่เปิดใช้งาน)
         settings = load_settings()
+        active_group_ids = [g.get("group_id") for g in settings.get("line_groups", [])]
+        
+        # ถ้าเป็นกลุ่มที่ยังไม่ได้ตั้งค่าเปิดใช้งานในระบบ จะให้บอทข้ามการทำงานไปเลย (ไม่สนใจข้อความ)
+        # (แต่ถ้าอยากให้บันทึก Group ID อัตโนมัติไว้ก่อน ค่อยเอาเงื่อนไขนี้ออก)
+        
+        # 2. เช็คว่าข้อความมีรูปแบบตรงกับฟอร์มใบงานหรือไม่ (เช่น ต้องมีคำว่า "接机รับ" หรือ "客户订单号" หรือรูปแบบ F05)
+        # ตัวอย่าง: เช็คว่าต้องมีคำว่า "客户订单号" หรือ "接机รับ" ถึงจะถือว่าเป็นฟอร์มใบงานที่ถูกต้อง
+        is_valid_form = "客户订单号" in received_text or "接机รับ" in received_text or received_text.startswith("F05")
+
+        if not is_valid_form:
+            # ถ้าไม่ใช่ฟอร์มที่กำหนด ให้ "จบการทำงานทันที" บอทจะไม่สนใจและไม่ตอบอะไรเลย
+            return 
+
+        # --- ถ้าผ่านเงื่อนไขว่าเป็นฟอร์มที่ถูกต้อง ค่อยทำกระบวนการต่อไป ---
         existing_ids = [g.get("group_id") for g in settings.get("line_groups", [])]
         if group_id not in existing_ids:
             settings.setdefault("line_groups", []).append({
@@ -458,7 +461,8 @@ def handle_message(event):
         sender_id = event.source.room_id
     elif source_type == 'user':
         sender_id = event.source.user_id
-
+        
+    # ส่งเข้าคิวประมวลผลเฉพาะข้อความที่เป็นฟอร์มจริง ๆ เท่านั้น
     add_job_to_queue(received_text, sender_id=sender_id)
 
 @app.route("/")
