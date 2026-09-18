@@ -434,22 +434,35 @@ def handle_message(event):
         group_id = event.source.group_id
         sender_id = group_id
         
-        # 1. ตรวจสอบว่ากลุ่มนี้ถูกบันทึก/เปิดใช้งานใน settings แล้วหรือยัง (ถ้าต้องการให้บล็อกกลุ่มที่ยังไม่เปิดใช้งาน)
-        settings = load_settings()
-        active_group_ids = [g.get("group_id") for g in settings.get("line_groups", [])]
+        # --- ตรวจสอบว่ามีคำสำคัญทั้งหมดครบถ้วนตามฟอร์มที่คุณระบุหรือไม่ ---
+        required_keywords = [
+            "（接机รับ）",
+            "【日期วันที่】",
+            "【时间เวลา】",
+            "【航班flight】",
+            "【人数จำนวนคน】",
+            "【行李กระเป๋า】",
+            "【接รับ】",
+            "【送ส่ง】",
+            "【车型ขนาดรถ】",
+            "【姓名ชื่อ】",
+            "【电话เบอร์โทร】",
+            "【客户订单号】",
+            "【接驳编码code】",
+            "【备注หมายเหต】"
+        ]
         
-        # ถ้าเป็นกลุ่มที่ยังไม่ได้ตั้งค่าเปิดใช้งานในระบบ จะให้บอทข้ามการทำงานไปเลย (ไม่สนใจข้อความ)
-        # (แต่ถ้าอยากให้บันทึก Group ID อัตโนมัติไว้ก่อน ค่อยเอาเงื่อนไขนี้ออก)
-        
-        # 2. เช็คว่าข้อความมีรูปแบบตรงกับฟอร์มใบงานหรือไม่ (เช่น ต้องมีคำว่า "接机รับ" หรือ "客户订单号" หรือรูปแบบ F05)
-        # ตัวอย่าง: เช็คว่าต้องมีคำว่า "客户订单号" หรือ "接机รับ" ถึงจะถือว่าเป็นฟอร์มใบงานที่ถูกต้อง
-        is_valid_form = "客户订单号" in received_text or "接机รับ" in received_text or received_text.startswith("F05")
+        # เช็คว่าข้อความที่ส่งเข้ามา มีคำสำคัญครบทุกคำหรือไม่
+        is_valid_form = all(keyword in received_text for keyword in required_keywords)
 
         if not is_valid_form:
-            # ถ้าไม่ใช่ฟอร์มที่กำหนด ให้ "จบการทำงานทันที" บอทจะไม่สนใจและไม่ตอบอะไรเลย
+            # ถ้ามีคำใดคำหนึ่งขาดหายไป (เช่น แชทคุยเล่นทั่วไป หรือฟอร์มไม่ครบ) 
+            # บอทจะตัดจบการทำงานทันทีโดยไม่ตอบอะไรและไม่บันทึก
             return 
+        # ------------------------------------------------
 
-        # --- ถ้าผ่านเงื่อนไขว่าเป็นฟอร์มที่ถูกต้อง ค่อยทำกระบวนการต่อไป ---
+        # ถ้าส่งฟอร์มมาถูกต้องครบถ้วน ระบบจะบันทึก Group ID ลง settings อัตโนมัติ (ถ้ายังไม่มี)
+        settings = load_settings()
         existing_ids = [g.get("group_id") for g in settings.get("line_groups", [])]
         if group_id not in existing_ids:
             settings.setdefault("line_groups", []).append({
@@ -462,8 +475,8 @@ def handle_message(event):
         sender_id = event.source.room_id
     elif source_type == 'user':
         sender_id = event.source.user_id
-        
-    # ส่งเข้าคิวประมวลผลเฉพาะข้อความที่เป็นฟอร์มจริง ๆ เท่านั้น
+
+    # ส่งเข้าคิวประมวลผลเฉพาะข้อความที่เป็นฟอร์มถูกต้องครบทุกหัวข้อเท่านั้น
     add_job_to_queue(received_text, sender_id=sender_id)
 
 @app.route("/")
