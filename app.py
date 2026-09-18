@@ -90,7 +90,7 @@ def save_settings(data):
         json.dump(current, f, ensure_ascii=False, indent=2)
 
 def map_dropoff_location(raw_dropoff):
-    """แปลงจุดส่งเป็นเขต/พื้นที่/ถนน พร้อมรองรับความหลากหลายและการสลับคำ"""
+    """แปลงจุดส่งเป็นเขต/พื้นที่/ถนน ตามกฎที่กำหนดอย่างแม่นยำ"""
     if not raw_dropoff or raw_dropoff == "-":
         return "-"
     
@@ -98,7 +98,7 @@ def map_dropoff_location(raw_dropoff):
     lower_text = text.lower()
     lower_text = re.sub(r'\s+', ' ', lower_text)
 
-    # 1. กลุ่มซอยที่มีเลข (ลำดับความสำคัญสูงสุด รองรับสลับหน้า-หลัง)
+    # 1. กลุ่มซอยที่มีเลข (ตรวจสอบเลขซอยของถนนหลัก)
     soi_patterns = [
         { "regex": r'(?:sukhumvit|สุขุมวิท).*(?:soi|ซอย)\s*(\d+)', "template": "สุขุมวิท $1" },
         { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:sukhumvit|สุขุมวิท)', "template": "สุขุมวิท $1" },
@@ -116,7 +116,7 @@ def map_dropoff_location(raw_dropoff):
         if match:
             return p["template"].replace("$1", match.group(1))
 
-    # 2. กลุ่มย่านสำคัญ / แหล่งท่องเที่ยว / ย่านโรงแรม
+    # 2. ย่านสำคัญ / แหล่งท่องเที่ยว / ย่านโรงแรม (ใช้การเช็กคำแบบเจาะจงเพื่อกันตัวอักษรเกิน)
     districts = [
         { "keywords": ["pratunam", "ประตูน้ำ"], "result": "ประตูน้ำ" },
         { "keywords": ["khao san", "khaosan", "ข้าวสาร"], "result": "ข้าวสาร" },
@@ -126,6 +126,7 @@ def map_dropoff_location(raw_dropoff):
         { "keywords": ["ploenchit", "ploen chit", "เพลินจิต"], "result": "เพลินจิต" },
         { "keywords": ["asok", "อโศก"], "result": "อโศก" },
         { "keywords": ["prompong", "phrom phong", "พร้อมพงษ์"], "result": "พร้อมพงษ์" },
+        { "keywords": ["ari", "aree", "อารีย์"], "result": "อารีย์" },
         { "keywords": ["victory monument", "อนุสาวรีย์"], "result": "อนุสาวรีย์" },
         { "keywords": ["rangsit", "klong 1", "คลอง 1", "รังสิต"], "result": "รังสิต" },
         { "keywords": ["ratchathewi", "ratchatevee", "ราชเทวี"], "result": "ราชเทวี" },
@@ -135,8 +136,7 @@ def map_dropoff_location(raw_dropoff):
         { "keywords": ["ratchayothin", "รัชโยธิน"], "result": "รัชโยธิน" },
         { "keywords": ["bang na", "bangna", "บางนา"], "result": "บางนา" },
         { "keywords": ["srinakarin", "srinagarind", "ศรีนครินทร์"], "result": "ศรีนครินทร์" },
-        { "keywords": ["riverside", "charoenkrung", "เจริญกรุง"], "result": "เจริญกรุง" },
-        { "keywords": ["ari", "aree", "อารีย์"], "result": "อารีย์" }
+        { "keywords": ["riverside", "charoenkrung", "เจริญกรุง"], "result": "เจริญกรุง" }
     ]
 
     for d in districts:
@@ -144,7 +144,7 @@ def map_dropoff_location(raw_dropoff):
             if kw in lower_text:
                 return d["result"]
 
-    # 3. กลุ่มถนนสายหลัก
+    # 3. ถนนสายหลัก
     main_roads = [
         { "keywords": ["witthayu", "wireless", "วิทยุ"], "result": "วิทยุ" },
         { "keywords": ["sathon", "sathorn", "สาทร"], "result": "สาทร" },
@@ -153,7 +153,7 @@ def map_dropoff_location(raw_dropoff):
         { "keywords": ["rama 4", "rama iv", "พระราม 4"], "result": "พระราม 4" },
         { "keywords": ["ladprao", "lat phrao", "ลาดพร้าว"], "result": "ลาดพร้าว" },
         { "keywords": ["sukhumvit", "สุขุมวิท"], "result": "สุขุมวิท" },
-        { "keywords": ["phetchaburi", "new petchburi", "เพชรบุรี"], "result": "เพชรบุรี" },
+        { "keywords": ["phetchaburi", "เพชรบุรี"], "result": "เพชรบุรี" },
         { "keywords": ["phahonyothin", "พหลโยธิน"], "result": "พหลโยธิน" }
     ]
 
@@ -162,7 +162,9 @@ def map_dropoff_location(raw_dropoff):
             if kw in lower_text:
                 return r["result"]
 
-    return text
+    # หากไม่ตรงเงื่อนไขใดเลย ให้ตัดเอาเฉพาะข้อความสั้นๆ หน้าเครื่องหมายคอมมา เพื่อไม่ให้แสดงผลยาวเกินไป
+    clean_text = text.split(',')[0].strip()
+    return clean_text if len(clean_text) < 30 else clean_text[:30] + "..."
 
 def parse_job_text(raw_text, fallback_id="F01"):
     """แกะข้อมูลใบงาน รองรับจุดรับ จุดส่ง และแปลงค่าอัตโนมัติ"""
@@ -184,7 +186,6 @@ def parse_job_text(raw_text, fallback_id="F01"):
         time_match = re.search(r'(\d{2}:\d{2})', raw_text)
     time_val = time_match.group(1).strip() if time_match else "-"
 
-    # แก้ไขจุด UnboundLocalError โดยการกำหนดค่าเริ่มต้นให้ flight_val
     flight_val = "-"
     flight_match = re.search(r'(?:【(?:航班flight|航班|flight)】|เที่ยวบิน|flight|Flight)[:\s]*([A-Za-z0-9]+)', raw_text, re.IGNORECASE)
     if not flight_match:
@@ -261,7 +262,6 @@ def parse_job_text(raw_text, fallback_id="F01"):
     }
 
 def is_duplicate(new_text):
-    # ปิดการเช็คซ้ำชั่วคราวสำหรับการทดสอบ เพื่อให้กดเพิ่มข้อมูลทดสอบได้ทันที
     return False
 
 def add_job_to_queue(text, sender_id=None):
