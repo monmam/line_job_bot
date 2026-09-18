@@ -303,11 +303,15 @@ def add_job_to_queue(text, sender_id=None):
     job_item = {
         "id": parsed_info["id"],
         "date": parsed_info["date"] if parsed_info["date"] != "-" else datetime.datetime.now().strftime("%d/%m/%Y"),
-        "text": text,
+        
+        # เพิ่มและตรวจสอบให้แน่ใจว่าส่งข้อความต้นฉบับไปครบถ้วนทั้งสองชื่อตัวแปรเผื่อไว้
+        "text": text,           
+        "raw_text": text,       
+        
         "time": parsed_info["time"] if parsed_info["time"] != "-" else now_str,
-        "pickup": parsed_info["pickup"],          # ใช้ค่าที่แมปแล้วเพื่อให้ UI แสดงผลเหมือน LINE
+        "pickup": parsed_info["pickup"],          
         "pickup_display": parsed_info["pickup"],    
-        "dropoff": parsed_info["dropoff"],        # ใช้ค่าที่แมปแล้วเพื่อให้ UI แสดงผลเหมือน LINE
+        "dropoff": parsed_info["dropoff"],        
         "dropoff_display": parsed_info["dropoff"],  
         "flight": parsed_info["flight"],
         "order": parsed_info["order"],
