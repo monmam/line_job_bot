@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
-    Configuration, ApiClient, MessagingApi, PushMessageRequest, ReplyMessageRequest, TextMessage
+    Configuration, ApiClient, MessagingApi, PushMessageRequest, TextMessage
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
@@ -59,6 +59,7 @@ def load_settings():
     default_settings = {
         "wait_seconds": 120,
         "line_groups": [],
+        "custom_keywords": [],
         "custom_locations": {
             "metropole": "เพชรบุรีตัดใหม่",
             "c u inn": "จตุจักร"
@@ -70,6 +71,10 @@ def load_settings():
                 data = json.load(f)
                 if "wait_seconds" not in data:
                     data["wait_seconds"] = 120
+                if "line_groups" not in data:
+                    data["line_groups"] = []
+                if "custom_keywords" not in data:
+                    data["custom_keywords"] = []
                 if "custom_locations" not in data:
                     data["custom_locations"] = default_settings["custom_locations"]
                 return data
@@ -90,6 +95,9 @@ def save_settings(data):
     if "line_groups" in data:
         current["line_groups"] = data["line_groups"]
 
+    if "custom_keywords" in data:
+        current["custom_keywords"] = data["custom_keywords"]
+
     if "custom_locations" in data:
         current["custom_locations"] = data["custom_locations"]
     
@@ -105,8 +113,16 @@ def map_dropoff_location(raw_dropoff):
     lower_text = text.lower()
     lower_text = re.sub(r'\s+', ' ', lower_text)
 
-    # 0. ตรวจสอบ Custom Locations จาก Settings ก่อน
+    # 0. ตรวจสอบ Custom Keywords จาก Settings
     settings = load_settings()
+    custom_keywords = settings.get("custom_keywords", [])
+    for item in custom_keywords:
+        kw = item.get("keyword", "").strip().lower()
+        zone = item.get("zone", "").strip()
+        if kw and kw in lower_text:
+            return zone
+
+    # ตรวจสอบ Custom Locations แบบเดิม
     custom_locs = settings.get("custom_locations", {})
     for keyword, mapped_name in custom_locs.items():
         if keyword.lower() in lower_text:
@@ -370,7 +386,8 @@ def process_batch_jobs():
 
         settings = load_settings()
         groups = settings.get("line_groups", [])
-        active_groups = [g for g in groups if g.get("enabled") and g.get("id")]
+        # ส่งไปทุกกลุ่มที่บันทึกไว้ใน settings (รองรับการส่งหลายกลุ่ม)
+        active_groups = [g for g in groups if g.get("group_id")]
 
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
@@ -379,12 +396,12 @@ def process_batch_jobs():
                 for grp in active_groups:
                     try:
                         push_request = PushMessageRequest(
-                            to=grp.get("id"),
+                            to=grp.get("group_id"),
                             messages=[TextMessage(text=summary_text)]
                         )
                         line_bot_api.push_message(push_request)
                     except Exception as e:
-                        print(f"❌ ส่งข้อความไปยังกลุ่ม LINE ล้มเหลว: {e}")
+                        print(f"❌ ส่งข้อความไปยังกลุ่ม LINE ({grp.get('name')}) ล้มเหลว: {e}")
             else:
                 if target_sender_id:
                     try:
@@ -408,57 +425,31 @@ def process_batch_jobs():
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    received_text = event.message.text.strip()
+    received_text = event.message.text
     source_type = event.source.type
     sender_id = None
-    target_id_for_reply = None
 
     if source_type == 'group':
         group_id = event.source.group_id
         sender_id = group_id
-        target_id_for_reply = group_id
-        
-        # จัดการบันทึก Group ID ลง Settings อัตโนมัติเมื่อบอทอยู่ในกลุ่ม
         settings = load_settings()
-        existing_ids = [g.get("id") for g in settings.get("line_groups", [])]
+        existing_ids = [g.get("group_id") for g in settings.get("line_groups", [])]
         if group_id not in existing_ids:
             settings.setdefault("line_groups", []).append({
-                "id": group_id,
-                "name": f"Group-{group_id[-4:]}",
-                "enabled": True
+                "group_id": group_id,
+                "name": f"Group-{group_id[-4:]}"
             })
             save_settings(settings)
-            
     elif source_type == 'room':
         sender_id = event.source.room_id
-        target_id_for_reply = sender_id
     elif source_type == 'user':
         sender_id = event.source.user_id
-        target_id_for_reply = sender_id
 
-    # ตรวจสอบคำสั่งพิเศษสำหรับดึง Group/Room/User ID (พิมพ์ myid หรือ id)
-    if received_text.lower() in ["myid", "id", "groupid"]:
-        reply_token = event.reply_token
-        id_message = f"📌 รหัส ID ของแชทนี้คือ:\n{target_id_for_reply}"
-        with ApiClient(configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            try:
-                line_bot_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=reply_token,
-                        messages=[TextMessage(text=id_message)]
-                    )
-                )
-            except Exception as e:
-                print(f"❌ ตอบกลับ ID ล้มเหลว: {e}")
-        return
-
-    # หากไม่ใช่คำสั่งขอ ID ให้ทำงานรับใบงานปกติ
     add_job_to_queue(received_text, sender_id=sender_id)
 
 @app.route("/")
 def index():
-    return render_template("ui.html")
+    return render_template("ui_5.html")
 
 @app.route("/api/status", methods=["GET"])
 def api_status():
@@ -477,6 +468,8 @@ def api_status():
         "time_left_seconds": time_left,
         "max_wait_seconds": wait_seconds,
         "latest_jobs": latest_jobs,
+        "custom_keywords": settings.get("custom_keywords", []),
+        "line_groups": settings.get("line_groups", []),
         "settings": settings
     })
 
@@ -488,7 +481,7 @@ def api_system_health():
 
     if LINE_CHANNEL_ACCESS_TOKEN and LINE_CHANNEL_SECRET:
         try:
-            with ApiClient(configuration):
+            with ApiClient(configuration) as api_client:
                 line_connected = True
         except Exception as e:
             print(f"LINE Bot check error: {e}")
