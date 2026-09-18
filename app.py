@@ -184,10 +184,14 @@ def parse_job_text(raw_text, fallback_id="F01"):
         time_match = re.search(r'(\d{2}:\d{2})', raw_text)
     time_val = time_match.group(1).strip() if time_match else "-"
 
+    # แก้ไขจุด UnboundLocalError โดยการกำหนดค่าเริ่มต้นให้ flight_val
+    flight_val = "-"
     flight_match = re.search(r'(?:【(?:航班flight|航班|flight)】|เที่ยวบิน|flight|Flight)[:\s]*([A-Za-z0-9]+)', raw_text, re.IGNORECASE)
     if not flight_match:
         flight_match = re.search(r'✈️?\s*([A-Za-z]{2}\d+|\d{3,4})', raw_text)
-    flight_val = flight_match.group(1).strip() if flight_val == "-" else (flight_match.group(1).strip() if flight_match else "-")
+    
+    if flight_match:
+        flight_val = flight_match.group(1).strip()
 
     pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if pickup_raw_match:
@@ -257,30 +261,11 @@ def parse_job_text(raw_text, fallback_id="F01"):
     }
 
 def is_duplicate(new_text):
-    new_info = parse_job_text(new_text)
-    new_order = new_info.get("order")
-    new_id = new_info.get("id")
-
-    for item in job_queue:
-        existing_text = item.get("text", "").strip()
-        existing_order = item.get("order", "")
-        existing_id = item.get("id", "")
-
-        if existing_text == new_text.strip():
-            return True
-        if new_order != "-" and existing_order == new_order:
-            return True
-        if new_id != "-" and existing_id == new_id:
-            return True
-
+    # ปิดการเช็คซ้ำชั่วคราวสำหรับการทดสอบ เพื่อให้กดเพิ่มข้อมูลทดสอบได้ทันที
     return False
 
 def add_job_to_queue(text, sender_id=None):
     global job_queue, timer_thread, timer_start_time, latest_jobs, last_sender_id
-
-def is_duplicate(new_text):
-    # ปิดการเช็คซ้ำชั่วคราวสำหรับการทดสอบ เพื่อให้กดเพิ่มข้อมูลทดสอบได้ทันที
-    return False
 
     now_str = datetime.datetime.now().strftime("%H:%M:%S")
     fallback_id = f"F{len(latest_jobs) + 1:02d}"
