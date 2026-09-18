@@ -348,17 +348,6 @@ def process_batch_jobs():
     timer_start_time = None
     last_sender_id = None
 
-@app.route("/callback", methods=['POST'])
-def callback():
-    signature = request.headers.get('X-Line-Signature', '')
-    body = request.get_data(as_text=True)
-
-    try:
-        handler.handle(body, signature)
-    except InvalidSignatureError:
-        abort(400)
-    return 'OK'
-
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     received_text = event.message.text
