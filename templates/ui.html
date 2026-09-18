@@ -438,7 +438,7 @@
         </select>
        </article>
 
-       <!-- ปรับแก้ System Status เป็น LINE BOT และเชื่อมต่อระบบ Health Check จริง -->
+       <!-- ระบบ Health Check จริง -->
        <article class="page-card p-4 md:p-6">
         <h2 class="m-0 text-sm font-bold text-[#0F172A]">System Status</h2>
         <div class="mt-4 space-y-3.5 text-xs">
@@ -458,7 +458,25 @@
        </article>
       </div>
 
-      <!-- เพิ่มส่วนตั้งค่ากำหนดโซนเอง (Custom Keywords Mapping) -->
+      <!-- ส่วนเชื่อมต่อกลุ่ม LINE (Multi-Group Integration) -->
+      <article class="page-card mt-5 p-4 md:p-6">
+       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <div>
+         <h2 class="m-0 text-sm font-bold text-[#0F172A]">เชื่อมต่อกลุ่ม LINE (LINE Groups)</h2>
+         <p class="mt-1 text-xs text-[#64748B]">เพิ่ม Group ID เพื่อส่งสรุปใบงานไปยังกลุ่มที่ต้องการ (พิมพ์คำสั่งหา ID จากบอทในกลุ่ม)</p>
+        </div>
+        <button id="add-group-row" type="button" class="rounded-lg bg-[#EFF6FF] text-[#2563EB] px-3 py-1.5 text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1 w-fit">
+         <i data-lucide="plus" class="h-3.5 w-3.5"></i> เพิ่มกลุ่ม LINE
+        </button>
+       </div>
+
+       <div id="line-groups-container" class="space-y-3 mt-4">
+        <!-- แถวรายการกลุ่มจะถูกเพิ่มที่นี่ผ่าน JavaScript -->
+       </div>
+       <p id="line-groups-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีการเชื่อมต่อกลุ่ม LINE</p>
+      </article>
+
+      <!-- ตั้งค่ากำหนดโซนเอง (Custom Keywords Mapping) -->
       <article class="page-card mt-5 p-4 md:p-6">
        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
@@ -611,14 +629,12 @@
       showView("detail");
     }
 
-    // ฟังก์ชันตรวจสอบ System Health Status จริงจาก Server
     async function checkSystemHealth() {
       try {
         const res = await fetch('/api/system_health');
         if (!res.ok) return;
         const data = await res.json();
 
-        // LINE BOT Status
         const lineEl = document.getElementById('status-line');
         if (data.line_bot) {
           lineEl.className = "flex items-center gap-1.5 text-[#22C55E] font-medium";
@@ -628,7 +644,6 @@
           lineEl.innerHTML = '<span class="status-dot bg-red-500"></span>Disconnected';
         }
 
-        // Google Sheets Status
         const sheetsEl = document.getElementById('status-sheets');
         if (data.google_sheets) {
           sheetsEl.className = "flex items-center gap-1.5 text-[#22C55E] font-medium";
@@ -693,6 +708,10 @@
 
         if (data.custom_keywords && Array.isArray(data.custom_keywords)) {
           renderKeywordsInputs(data.custom_keywords);
+        }
+
+        if (data.line_groups && Array.isArray(data.line_groups)) {
+          renderLineGroupsInputs(data.line_groups);
         }
 
         if (data.time_left_seconds !== undefined && data.queue_count > 0) {
@@ -760,6 +779,42 @@
       }
     }
 
+    // ฟังก์ชันจัดการแสดงผลแถวกรอกข้อมูลกลุ่ม LINE
+    function renderLineGroupsInputs(groups) {
+      const container = document.getElementById('line-groups-container');
+      const emptyText = document.getElementById('line-groups-empty');
+      if (!container) return;
+
+      if (document.activeElement.tagName !== 'INPUT') {
+        if (!groups || groups.length === 0) {
+          container.innerHTML = '';
+          emptyText.classList.remove('hidden');
+          return;
+        }
+        emptyText.classList.add('hidden');
+        container.innerHTML = groups.map((item, idx) => `
+          <div class="flex items-center gap-2 line-group-row">
+            <input type="text" placeholder="ชื่อกลุ่ม (เช่น กลุ่มรถ โซน A)" value="${item.name || ''}" class="group-name-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+            <input type="text" placeholder="LINE Group ID (Cxxxxxxxx...)" value="${item.group_id || ''}" class="group-id-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs font-mono outline-none focus:border-[#2563EB]">
+            <button type="button" onclick="this.closest('.line-group-row').remove(); toggleGroupsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+              <i data-lucide="trash-2" class="h-4 w-4"></i>
+            </button>
+          </div>
+        `).join('');
+        lucide.createIcons();
+      }
+    }
+
+    function toggleGroupsEmpty() {
+      const container = document.getElementById('line-groups-container');
+      const emptyText = document.getElementById('line-groups-empty');
+      if (container.children.length === 0) {
+        emptyText.classList.remove('hidden');
+      } else {
+        emptyText.classList.add('hidden');
+      }
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
       const addKeywordBtn = document.getElementById('add-keyword-row');
       if (addKeywordBtn) {
@@ -772,6 +827,25 @@
             <input type="text" placeholder="คำเฉพาะ (เช่น สุวรรณภูมิ)" class="keyword-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
             <input type="text" placeholder="โซนเป้าหมาย (เช่น BKK)" class="zone-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
             <button type="button" onclick="this.closest('.keyword-row').remove(); toggleKeywordsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+              <i data-lucide="trash-2" class="h-4 w-4"></i>
+            </button>
+          `;
+          container.appendChild(div);
+          lucide.createIcons();
+        });
+      }
+
+      const addGroupBtn = document.getElementById('add-group-row');
+      if (addGroupBtn) {
+        addGroupBtn.addEventListener('click', () => {
+          const container = document.getElementById('line-groups-container');
+          document.getElementById('line-groups-empty').classList.add('hidden');
+          const div = document.createElement('div');
+          div.className = "flex items-center gap-2 line-group-row";
+          div.innerHTML = `
+            <input type="text" placeholder="ชื่อกลุ่ม (เช่น กลุ่มรถ โซน A)" class="group-name-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+            <input type="text" placeholder="LINE Group ID (Cxxxxxxxx...)" class="group-id-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs font-mono outline-none focus:border-[#2563EB]">
+            <button type="button" onclick="this.closest('.line-group-row').remove(); toggleGroupsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
               <i data-lucide="trash-2" class="h-4 w-4"></i>
             </button>
           `;
@@ -899,13 +973,24 @@
           }
         });
 
+        const groupRows = document.querySelectorAll(".line-group-row");
+        const lineGroups = [];
+        groupRows.forEach(row => {
+          const name = row.querySelector(".group-name-input").value.trim();
+          const groupId = row.querySelector(".group-id-input").value.trim();
+          if (name && groupId) {
+            lineGroups.push({ name: name, group_id: groupId });
+          }
+        });
+
         try {
           const res = await fetch('/api/save_settings', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
               waiting_time: waitingTimeVal,
-              custom_keywords: customKeywords 
+              custom_keywords: customKeywords,
+              line_groups: lineGroups
             })
           });
           const data = await res.json();
@@ -917,10 +1002,10 @@
       });
 
       setInterval(fetchDashboardData, 1000);
-      setInterval(checkSystemHealth, 30000); // เช็คสถานะระบบทุกๆ 30 วินาที
+      setInterval(checkSystemHealth, 30000);
       fetchDashboardData();
       fetchGoogleSheetsData();
-      checkSystemHealth(); // เรียกเช็คทันทีเมื่อโหลดหน้า
+      checkSystemHealth();
       lucide.createIcons();
     });
 
