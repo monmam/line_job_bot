@@ -428,61 +428,117 @@ def process_batch_jobs():
 def handle_message(event):
     received_text = event.message.text.strip()
     source_type = event.source.type
-    sender_id = None
+    user_id = event.source.user_id if hasattr(event.source, 'user_id') else None
 
+    # 1. จัดการคำสั่งในกลุ่ม (เชื่อมต่อกลุ่มด้วยคำว่า "id" หรือเช็คกลุ่มด้วย "check_groups")
     if source_type == 'group':
         group_id = event.source.group_id
-        sender_id = group_id
         
-        # --- เพิ่มเงื่อนไข: ถ้าพิมพ์คำว่า "id" ในกลุ่ม ให้บอทตอบกลับ Group ID ทันที ---
         if received_text.lower() == "id":
-            # บันทึกกลุ่มนี้ลงในตั้งค่าอัตโนมัติว่าเป็นกลุ่มเป้าหมาย
             settings = load_settings()
-            settings["target_job_group_id"] = group_id  # บันทึกเป็นกลุ่มสำหรับส่งใบงานสรุป
+            existing_groups = settings.get("line_groups", [])
+            
+            if not any(g.get("group_id") == group_id for g in existing_groups):
+                existing_groups.append({"group_id": group_id, "name": f"Group-{group_id[-4:]}"})
+            
+            settings["line_groups"] = existing_groups
             save_settings(settings)
             
-            # ส่งข้อความตอบกลับบอก ID ของกลุ่มนี้
             with ApiClient(configuration) as api_client:
                 line_bot_api = MessagingApi(api_client)
                 line_bot_api.reply_message(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
-                        messages=[TextMessage(text=f"เชื่อมต่อกลุ่มนี้สำเร็จ!\nGroup ID ของคุณคือ:\n{group_id}")]
+                        messages=[TextMessage(text=f"Group ID ของคุณคือ!\nID: {group_id}")]
                     )
                 )
             return
-        # -------------------------------------------------------------
 
-        # --- ตรวจสอบรูปแบบฟอร์มใบงาน ---
-        required_keywords = [
-            "（接机รับ）",
-            "【日期วันที่】",
-            "【时间เวลา】",
-            "【航班flight】",
-            "【人数จำนวนคน】",
-            "【行李กระเป๋า】",
-            "【接รับ】",
-            "【送ส่ง】",
-            "【车型ขนาดรถ】",
-            "【姓名ชื่อ】",
-            "【电话เบอร์โทร】",
-            "【客户订单号】",
-            "【接驳编码code】",
-            "【备注หมายเหต】"
-        ]
-        
-        is_valid_form = all(keyword in received_text for keyword in required_keywords)
-
-        if not is_valid_form:
-            return  # ถ้าไม่ใช่ฟอร์มและไม่ใช่คำว่า "id" บอทจะไม่ตอบอะไรเลย
+        elif received_text.lower() == "check_groups":
+            settings = load_settings()
+            groups = settings.get("line_groups", [])
+            group_list_text = "\n".join([f"- {g.get('name')} ({g.get('group_id')})" for g in groups]) if groups else "ยังไม่มีกลุ่มที่เชื่อมต่อ"
             
-    elif source_type == 'room':
-        sender_id = event.source.room_id
-    elif source_type == 'user':
-        sender_id = event.source.user_id
+            with ApiClient(configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=f"📋 รายชื่อกลุ่มที่เชื่อมต่ออยู่:\n{group_list_text}")]
+                    )
+                )
+            return
 
-    # ส่งเข้าคิวประมวลผลเมื่อเป็นฟอร์มที่ถูกต้อง
-    add_job_to_queue(received_text, sender_id=sender_id)
+    # 2. ตรวจสอบรูปแบบฟอร์มใบงาน (F05)
+    required_keywords = [
+        "（接机รับ）",
+        "【日期วันที่】",
+        "【เวลาเวลา】",
+        "【航班flight】",
+        "【人数จำนวนคน】",
+        "【行李กระเป๋า】",
+        "【接รับ】",
+        "【ส่งส่ง】",
+        "【车型ขนาดรถ】",
+        "【姓名ชื่อ】",
+        "【电话เบอร์โทร】",
+        "【客户订单号】",
+        "【接驳编码code】",
+        "【备注หมายเหต】"
+    ]
+    
+    is_valid_form = all(keyword in received_text for keyword in required_keywords)
+
+    if not is_valid_form:
+        return  # ถ้าไม่ใช่ฟอร์มและไม่ใช่คำสั่ง ให้ข้ามไปเลย
+
+    # 3. ขั้นตอนการทำงานหลังตรวจสอบฟอร์มผ่าน
+    settings = load_settings()
+    connected_groups = settings.get("line_groups", [])
+
+    with ApiClient(configuration) as api_client:
+        line_bot_api = MessagingApi(api_client)
+        
+        # 3.1 ส่ง "ใบสรุปงาน" กลับมาหาคุณในแชทส่วนตัว (OA) ทันทีที่สรุปเสร็จ
+        if user_id:
+            try:
+                line_bot_api.push_message(
+                    PushMessageRequest(
+                        to=user_id,
+                        messages=[TextMessage(text=f"📋 **ใบสรุปงาน (ส่งถึงคุณ):**\n\n{received_text}")]
+                    )
+                )
+            except Exception as e:
+                print(f"Push summary to personal chat error: {e}")
+
+        # ถ้าส่งฟอร์มมาจากแชทส่วนตัวโดยตรง ให้ตอบกลับปิดท้ายเล็กน้อย (หรือไม่ต้องมีก็ได้)
+        if source_type == 'user':
+            try:
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=event.reply_token,
+                        messages=[TextMessage(text=f"✅ ประมวลผลและส่งใบสรุปงานเข้ากลุ่มเรียบร้อยแล้ว")]
+                    )
+                )
+            except Exception as e:
+                print(f"Reply error: {e}")
+
+        # 3.2 เช็คกลุ่มที่เชื่อมต่อทั้งหมด แล้ว "ส่งข้อความ/ใบสรุปงานเข้าไปในกลุ่มนั้น"
+        for group in connected_groups:
+            g_id = group.get("group_id")
+            if g_id:
+                try:
+                    line_bot_api.push_message(
+                        PushMessageRequest(
+                            to=g_id,
+                            messages=[TextMessage(text=f"{received_text}")]
+                        )
+                    )
+                except Exception as e:
+                    print(f"Push to group {g_id} error: {e}")
+
+    # ส่งเข้าคิวระบบหลังบ้านเพื่อบันทึกข้อมูล (เช่น Google Sheets)
+    add_job_to_queue(received_text, sender_id=user_id)
 
 @app.route("/")
 def index():
