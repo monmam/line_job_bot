@@ -438,16 +438,21 @@
         </select>
        </article>
 
+       <!-- ปรับแก้ System Status เป็น LINE BOT และเชื่อมต่อระบบ Health Check จริง -->
        <article class="page-card p-4 md:p-6">
         <h2 class="m-0 text-sm font-bold text-[#0F172A]">System Status</h2>
         <div class="mt-4 space-y-3.5 text-xs">
          <div class="flex justify-between border-b border-[#F1F5F9] pb-3">
-          <span class="text-[#64748B]">LINE OA</span>
-          <span class="flex items-center gap-1.5 text-[#22C55E] font-medium"><span class="status-dot bg-[#22C55E]"></span>Connected</span>
+          <span class="text-[#64748B]">LINE BOT</span>
+          <span id="status-line" class="flex items-center gap-1.5 text-[#94A3B8] font-medium">
+           <span class="status-dot bg-[#94A3B8]" id="dot-line"></span>กำลังตรวจสอบ...
+          </span>
          </div>
          <div class="flex justify-between border-b border-[#F1F5F9] pb-3">
           <span class="text-[#64748B]">Google Sheets</span>
-          <span class="flex items-center gap-1.5 text-[#22C55E] font-medium"><span class="status-dot bg-[#22C55E]"></span>Connected</span>
+          <span id="status-sheets" class="flex items-center gap-1.5 text-[#94A3B8] font-medium">
+           <span class="status-dot bg-[#94A3B8]" id="dot-sheets"></span>กำลังตรวจสอบ...
+          </span>
          </div>
         </div>
        </article>
@@ -600,11 +605,41 @@
       const summary = job.formatted_summary || `${id}(🥶)${time}/${priceVal}#${carCode}\n${pickupDisp}-${dropoffDisp} ✈️${flightVal}\n${orderVal}`;
       document.getElementById("detail-summary-text").textContent = summary;
       
-      // ดึงข้อความต้นฉบับทั้งหมดจากทุกฟิลด์ที่เป็นไปได้
       const originalText = getJobVal(job, 'text', 'raw_text', 'Raw Text', 'ข้อความต้นฉบับ', 'formatted_summary');
       document.getElementById("original-content").textContent = originalText;
       document.getElementById("original-content").classList.remove("open");
       showView("detail");
+    }
+
+    // ฟังก์ชันตรวจสอบ System Health Status จริงจาก Server
+    async function checkSystemHealth() {
+      try {
+        const res = await fetch('/api/system_health');
+        if (!res.ok) return;
+        const data = await res.json();
+
+        // LINE BOT Status
+        const lineEl = document.getElementById('status-line');
+        if (data.line_bot) {
+          lineEl.className = "flex items-center gap-1.5 text-[#22C55E] font-medium";
+          lineEl.innerHTML = '<span class="status-dot bg-[#22C55E]"></span>Connected';
+        } else {
+          lineEl.className = "flex items-center gap-1.5 text-red-500 font-medium";
+          lineEl.innerHTML = '<span class="status-dot bg-red-500"></span>Disconnected';
+        }
+
+        // Google Sheets Status
+        const sheetsEl = document.getElementById('status-sheets');
+        if (data.google_sheets) {
+          sheetsEl.className = "flex items-center gap-1.5 text-[#22C55E] font-medium";
+          sheetsEl.innerHTML = '<span class="status-dot bg-[#22C55E]"></span>Connected';
+        } else {
+          sheetsEl.className = "flex items-center gap-1.5 text-red-500 font-medium";
+          sheetsEl.innerHTML = '<span class="status-dot bg-red-500"></span>Disconnected';
+        }
+      } catch (err) {
+        console.error("Health check failed", err);
+      }
     }
 
     async function fetchGoogleSheetsData() {
@@ -676,7 +711,6 @@
         }
 
         if (data.latest_jobs && data.latest_jobs.length > 0) {
-          // เก็บข้อมูลคิวลงใน localJobs ด้วย เพื่อให้กดดูรายละเอียดข้อความต้นฉบับได้
           data.latest_jobs.forEach(j => {
             const jId = getJobVal(j, 'id', 'job_id', 'code');
             if (jId !== "-") {
@@ -883,8 +917,10 @@
       });
 
       setInterval(fetchDashboardData, 1000);
+      setInterval(checkSystemHealth, 30000); // เช็คสถานะระบบทุกๆ 30 วินาที
       fetchDashboardData();
       fetchGoogleSheetsData();
+      checkSystemHealth(); // เรียกเช็คทันทีเมื่อโหลดหน้า
       lucide.createIcons();
     });
 
