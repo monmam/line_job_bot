@@ -421,9 +421,23 @@ def handle_message(event):
         "【接驳编码code】", "【备注หมายเหต】"
     ]
     
-    is_valid_form = all(keyword in received_text for keyword in required_keywords)
+is_valid_form = all(keyword in received_text for keyword in required_keywords)
+
     if not is_valid_form:
-        return  
+        # ตอบกลับเตือนในแชทส่วนตัวว่าฟอร์มไม่ถูกต้อง
+        if user_id:
+            try:
+                with ApiClient(configuration) as api_client:
+                    line_bot_api = MessagingApi(api_client)
+                    line_bot_api.push_message(
+                        PushMessageRequest(
+                            to=user_id,
+                            messages=[TextMessage(text="⚠️ รูปแบบใบงานไม่ถูกต้อง ขาดหัวข้อบังคับบางรายการ กรุณาตรวจสอบฟอร์มใหม่อีกครั้ง")]
+                        )
+                    )
+            except Exception as e:
+                print(f"Error sending warning: {e}")
+        return
 
     settings = load_settings()
     connected_groups = settings.get("line_groups", [])
