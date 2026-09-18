@@ -292,7 +292,7 @@ def add_job_to_queue(text, sender_id=None):
     job_item = {
         "id": parsed_info["id"],
         "date": parsed_info["date"] if parsed_info["date"] != "-" else datetime.datetime.now().strftime("%d/%m/%Y"),
-        "text": text,
+        "text": text,  # <-- ตรงนี้เก็บ "ข้อความต้นฉบับดิบ" ที่ส่งเข้ามาตรงๆ เลย
         "time": parsed_info["time"] if parsed_info["time"] != "-" else now_str,
         "pickup": parsed_info["pickup_raw"],        
         "pickup_display": parsed_info["pickup"],    
