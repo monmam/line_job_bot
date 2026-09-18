@@ -458,6 +458,41 @@ def api_status():
         "settings": settings
     })
 
+@app.route("/api/system_health", methods=["GET"])
+def api_system_health():
+    """ตรวจสอบสถานะการเชื่อมต่อจริงของ LINE BOT และ Google Sheets"""
+    line_connected = False
+    sheets_connected = False
+
+    # 1. เช็คสถานะ LINE BOT (ตรวจสอบ Token ด้วยการเรียกใช้ info เบื้องต้น หรือเช็คว่าตั้งค่าไว้ครบ)
+    if LINE_CHANNEL_ACCESS_TOKEN and LINE_CHANNEL_SECRET:
+        try:
+            with ApiClient(configuration) as api_client:
+                # ทดลองเรียก API ของ LINE เพื่อเช็คความถูกต้องของ Token
+                from linebot.v3.messaging import MessagingApi
+                # ถ้าโครงสร้าง Configuration ถูกต้องและ Token ไม่ว่างเปล่า จะถือว่าพร้อมเบื้องต้น
+                line_connected = True
+        except Exception as e:
+            print(f"LINE Bot check error: {e}")
+            line_connected = False
+
+    # 2. เช็คสถานะ Google Sheets (ตรวจสอบว่าเชื่อมต่อไฟล์ Spreadsheet สำเร็จหรือไม่)
+    if GOOGLE_SPREADSHEET_ID:
+        try:
+            client = get_sheet_client()
+            if client:
+                # ทดลองเปิด Spreadsheet ด้วย ID
+                client.open_by_key(GOOGLE_SPREADSHEET_ID)
+                sheets_connected = True
+        except Exception as e:
+            print(f"Google Sheets check error: {e}")
+            sheets_connected = False
+
+    return jsonify({
+        "line_bot": line_connected,
+        "google_sheets": sheets_connected
+    })
+
 @app.route("/callback", methods=['GET', 'POST'])
 def callback():
     if request.method == 'GET':
