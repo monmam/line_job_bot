@@ -167,33 +167,37 @@ def map_dropoff_location(raw_dropoff):
     return clean_text if len(clean_text) < 30 else clean_text[:30] + "..."
 
 def parse_job_text(raw_text, fallback_id="F01"):
-    """แกะข้อมูลใบงาน รองรับจุดรับ จุดส่ง และแปลงค่าอัตโนมัติ"""
+    """แกะข้อมูลใบงาน รองรับจุดรับ จุดส่ง และแปลงค่าอัตโนมัติ (เวอร์ชันอัปเดต)"""
     if not raw_text:
         return {}
 
     lines = [line.strip() for line in raw_text.strip().split('\n') if line.strip()]
     
+    # 1. รหัสใบงาน (Job ID)
     id_match = re.search(r'(?:รหัสใบงาน|Job ID|ID)[:\s]*([A-Za-z0-9_-]+)', raw_text, re.IGNORECASE)
     if not id_match and lines:
         id_match = re.search(r'^([A-Za-z0-9_-]+)', lines[0])
     job_id = id_match.group(1).strip() if id_match else fallback_id
 
+    # 2. วันที่ (Date)
     date_match = re.search(r'(?:【(?:日期วันที่|日期|วันที่)】|วันที่|Date)[:\s]*([\d/\-]+)', raw_text, re.IGNORECASE)
     date_val = date_match.group(1).strip() if date_match else "-"
 
+    # 3. เวลา (Time)
     time_match = re.search(r'(?:【(?:时间时间|时间|เวลา)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
     if not time_match:
         time_match = re.search(r'(\d{2}:\d{2})', raw_text)
     time_val = time_match.group(1).strip() if time_match else "-"
 
+    # 4. เที่ยวบิน (Flight)
     flight_val = "-"
     flight_match = re.search(r'(?:【(?:航班flight|航班|flight)】|เที่ยวบิน|flight|Flight)[:\s]*([A-Za-z0-9]+)', raw_text, re.IGNORECASE)
     if not flight_match:
         flight_match = re.search(r'✈️?\s*([A-Za-z]{2}\d+|\d{3,4})', raw_text)
-    
     if flight_match:
         flight_val = flight_match.group(1).strip()
 
+    # 5. จุดรับ (Pickup)
     pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if pickup_raw_match:
         pickup_raw = pickup_raw_match.group(1).strip()
@@ -214,17 +218,23 @@ def parse_job_text(raw_text, fallback_id="F01"):
     else:
         pickup_mapped = PICKUP_MAP.get(pickup_upper, pickup_raw)
 
-    dropoff_raw_match = re.search(r'(?:【(?:ส่งส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
+    # 6. จุดส่ง (Dropoff) - รองรับแท็ก 【送ส่ง】 และตัดวงเล็บพิกัดออกอย่างแม่นยำ
+    dropoff_raw = "-"
+    dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if dropoff_raw_match:
         dropoff_raw = dropoff_raw_match.group(1).strip()
+        dropoff_raw = re.sub(r'[\),].*$', '', dropoff_raw).strip()
     else:
-        dropoff_raw = "-"
-        lines_text = raw_text.split('\n')
-        if len(lines_text) > 1:
-            dropoff_raw = lines_text[1].strip()
+        for line in lines:
+            if any(k in line for k in ["【", "✈️", "รหัส", "Order", "380", "480"]) or ":" in line:
+                continue
+            if line != pickup_raw and line != time_val:
+                dropoff_raw = line
+                break
 
     dropoff_mapped = map_dropoff_location(dropoff_raw)
 
+    # 7. ขนาดรถและราคา (Car & Price)
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if car_raw_match:
         car_raw = car_raw_match.group(1).strip().upper()
@@ -239,6 +249,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
     car_code = car_info["code"]
     price_val = car_info["price"]
 
+    # 8. หมายเลขคำสั่งซื้อ (Order)
     order_match = re.search(r'(?:【(?:客户订单号|订单号|Order)】|Order|Order Number|คำสั่งซื้อ|Order ID)[:\s]*([0-9A-Za-z_-]+)', raw_text, re.IGNORECASE)
     if not order_match:
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
