@@ -55,18 +55,6 @@ CAR_PRICING_MAP = {
     "CAMRY/7S": {"code": "7S", "price": "480"}
 }
 
-DISTRICT_MAP = {
-    "CHATUCHAK": "จตุจักร",
-    "PATHUM WAN": "ปทุมวัน",
-    "SUKHUMVIT": "สุขุมวิท",
-    "BANG RAK": "บางรัก",
-    "PETCHABURI": "เพชรบุรีตัดใหม่",
-    "RATCHATHEWI": "ราชเทวี",
-    "BANG KAPI": "บางกะปิ",
-    "DON MUEANG": "ดอนเมือง",
-    "LAT KRABANG": "ลาดกระบัง"
-}
-
 def load_settings():
     if os.path.exists("settings.json"):
         with open("settings.json", "r", encoding="utf-8") as f:
@@ -102,21 +90,81 @@ def save_settings(data):
         json.dump(current, f, ensure_ascii=False, indent=2)
 
 def map_dropoff_location(raw_dropoff):
-    """แปลงจุดส่งเป็นเขต/พื้นที่"""
+    """แปลงจุดส่งเป็นเขต/พื้นที่/ถนน พร้อมรองรับความหลากหลายและการสลับคำ"""
     if not raw_dropoff or raw_dropoff == "-":
         return "-"
     
-    upper_dropoff = raw_dropoff.upper()
-    for eng_key, thai_name in DISTRICT_MAP.items():
-        if eng_key in upper_dropoff:
-            if eng_key == "SUKHUMVIT":
-                soi_match = re.search(r'SUKHUMVIT\s*(\d+)', upper_dropoff)
-                if soi_match:
-                    return f"สุขุมวิท {soi_match.group(1)}"
-            return thai_name
-            
-    parts = raw_dropoff.split(',')
-    return parts[0].strip()
+    text = raw_dropoff.strip()
+    lower_text = text.lower()
+    # จัดการช่องว่างส่วนเกิน
+    lower_text = re.sub(r'\s+', ' ', lower_text)
+
+    # 1. กลุ่มซอยที่มีเลข (ลำดับความสำคัญสูงสุด รองรับสลับหน้า-หลัง)
+    soi_patterns = [
+        { "regex": r'(?:sukhumvit|สุขุมวิท).*(?:soi|ซอย)\s*(\d+)', "template": "สุขุมวิท $1" },
+        { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:sukhumvit|สุขุมวิท)', "template": "สุขุมวิท $1" },
+        { "regex": r'(?:sukhumvit|สุขุมวิท)\s*[-]?\s*(\d+)', "template": "สุขุมวิท $1" },
+        { "regex": r'(?:phahonyothin|พหลโยธิน).*(?:soi|ซอย)\s*(\d+)', "template": "พหลโยธิน $1" },
+        { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:phahonyothin|พหลโยธิน)', "template": "พหลโยธิน $1" },
+        { "regex": r'(?:phahonyothin|พหลโยธิน)\s*[-]?\s*(\d+)', "template": "พหลโยธิน $1" },
+        { "regex": r'(?:phetchaburi|เพชรบุรี).*(?:soi|ซอย)\s*(\d+)', "template": "เพชรบุรี $1" },
+        { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:phetchaburi|เพชรบุรี)', "template": "เพชรบุรี $1" },
+        { "regex": r'(?:phetchaburi|เพชรบุรี)\s*[-]?\s*(\d+)', "template": "เพชรบุรี $1" }
+    ]
+
+    for p in soi_patterns:
+        match = re.search(p["regex"], lower_text)
+        if match:
+            return p["template"].replace("$1", match.group(1))
+
+    # 2. กลุ่มย่านสำคัญ / แหล่งท่องเที่ยว / ย่านโรงแรม
+    districts = [
+        { "keywords": ["pratunam", "ประตูน้ำ"], "result": "ประตูน้ำ" },
+        { "keywords": ["khao san", "khaosan", "ข้าวสาร"], "result": "ข้าวสาร" },
+        { "keywords": ["yaowarat", "chinatown", "เยาวราช"], "result": "เยาวราช" },
+        { "keywords": ["thonglor", "thong lor", "ทองหล่อ"], "result": "ทองหล่อ" },
+        { "keywords": ["ekkamai", "เอกมัย"], "result": "เอกมัย" },
+        { "keywords": ["ploenchit", "ploen chit", "เพลินจิต"], "result": "เพลินจิต" },
+        { "keywords": ["asok", "อโศก"], result: "อโศก" },
+        { "keywords": ["prompong", "phrom phong", "พร้อมพงษ์"], result: "พร้อมพงษ์" },
+        { "keywords": ["victory monument", "อนุสาวรีย์"], result: "อนุสาวรีย์" },
+        { "keywords": ["rangsit", "klong 1", "คลอง 1", "รังสิต"], "result": "รังสิต" },
+        { "keywords": ["ratchathewi", "ratchatevee", "ราชเทวี"], result: "ราชเทวี" },
+        { "keywords": ["pathum wan", "pathumwan", "ปทุมวัน"], result: "ปทุมวัน" },
+        { "keywords": ["huai khwang", "ห้วยขวาง"], result: "ห้วยขวาง" },
+        { "keywords": ["ratchada", "รัชดา"], result: "รัชดา" },
+        { "keywords": ["ratchayothin", "รัชโยธิน"], result: "รัชโยธิน" },
+        { "keywords": ["bang na", "bangna", "บางนา"], result: "บางนา" },
+        { "keywords": ["srinakarin", "srinagarind", "ศรีนครินทร์"], result: "ศรีนครินทร์" },
+        { "keywords": ["riverside", "charoenkrung", "เจริญกรุง"], result: "เจริญกรุง" },
+        { "keywords": ["ari", "aree", "อารีย์"], result: "อารีย์" }
+    ]
+
+    for d in districts:
+        for kw in d["keywords"]:
+            if kw in lower_text:
+                return d["result"]
+
+    # 3. กลุ่มถนนสายหลัก
+    main_roads = [
+        { "keywords": ["witthayu", "wireless", "วิทยุ"], "result": "วิทยุ" },
+        { "keywords": ["sathon", "sathorn", "สาทร"], "result": "สาทร" },
+        { "keywords": ["silom", "สีลม"], "result": "สีลม" },
+        { "keywords": ["rama 9", "rama ix", "พระราม 9"], "result": "พระราม 9" },
+        { "keywords": ["rama 4", "rama iv", "พระราม 4"], "result": "พระราม 4" },
+        { "keywords": ["ladprao", "lat phrao", "ลาดพร้าว"], "result": "ลาดพร้าว" },
+        { "keywords": ["sukhumvit", "สุขุมวิท"], "result": "สุขุมวิท" },
+        { "keywords": ["phetchaburi", "new petchburi", "เพชรบุรี"], "result": "เพชรบุรี" },
+        { "keywords": ["phahonyothin", "พหลโยธิน"], "result": "พหลโยธิน" }
+    ]
+
+    for r in main_roads:
+        for kw in r["keywords"]:
+            if kw in lower_text:
+                return r["result"]
+
+    # หากไม่ตรงกับเงื่อนไขใดเลย คืนค่าข้อความเดิมกลับไป (ไม่เดาพร่ำเพรื่อ)
+    return text
 
 def parse_job_text(raw_text, fallback_id="F01"):
     """แกะข้อมูลใบงาน รองรับจุดรับ จุดส่ง และแปลงค่าอัตโนมัติ"""
@@ -165,17 +213,15 @@ def parse_job_text(raw_text, fallback_id="F01"):
         pickup_mapped = PICKUP_MAP.get(pickup_upper, pickup_raw)
 
     # ตรวจสอบจุดส่ง (Drop-off)
-    dropoff_raw_match = re.search(r'(?:【(?:ส่งส่ง|送|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
+    dropoff_raw_match = re.search(r'(?:【(?:ส่งส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if dropoff_raw_match:
         dropoff_raw = dropoff_raw_match.group(1).strip()
     else:
-        found_dropoff = "-"
-        upper_text = raw_text.upper()
-        for eng_key in DISTRICT_MAP.keys():
-            if eng_key in upper_text:
-                found_dropoff = eng_key
-                break
-        dropoff_raw = found_dropoff
+        dropoff_raw = "-"
+        # ค้นหาคร่าวๆ จากข้อความทั้งหมดหากไม่มีคีย์เวิร์ดชัดเจน
+        lines_text = raw_text.split('\n')
+        if len(lines_text) > 1:
+            dropoff_raw = lines_text[1].strip()
 
     dropoff_mapped = map_dropoff_location(dropoff_raw)
 
@@ -399,7 +445,6 @@ def api_status():
 
 @app.route("/callback", methods=['GET', 'POST'])
 def callback():
-    # ถ้าระบบ LINE ส่ง GET มาเช็ค (ตอนกดปุ่ม Verify) ให้ตอบกลับ OK ทันที
     if request.method == 'GET':
         return 'OK', 200
 
