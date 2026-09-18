@@ -278,7 +278,9 @@ def is_duplicate(new_text):
 def add_job_to_queue(text, sender_id=None):
     global job_queue, timer_thread, timer_start_time, latest_jobs, last_sender_id
 
-
+def is_duplicate(new_text):
+    # ปิดการเช็คซ้ำชั่วคราวสำหรับการทดสอบ เพื่อให้กดเพิ่มข้อมูลทดสอบได้ทันที
+    return False
 
     now_str = datetime.datetime.now().strftime("%H:%M:%S")
     fallback_id = f"F{len(latest_jobs) + 1:02d}"
