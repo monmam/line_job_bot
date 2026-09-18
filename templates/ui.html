@@ -706,14 +706,6 @@
           }
         }
 
-        if (data.custom_keywords && Array.isArray(data.custom_keywords)) {
-          renderKeywordsInputs(data.custom_keywords);
-        }
-
-        if (data.line_groups && Array.isArray(data.line_groups)) {
-          renderLineGroupsInputs(data.line_groups);
-        }
-
         if (data.time_left_seconds !== undefined && data.queue_count > 0) {
           const mins = Math.floor(data.time_left_seconds / 60).toString().padStart(2, '0');
           const secs = (data.time_left_seconds % 60).toString().padStart(2, '0');
@@ -744,29 +736,44 @@
       }
     }
 
+    async function loadSettings() {
+      try {
+        const res = await fetch('/api/status');
+        if (!res.ok) return;
+        const data = await res.json();
+        
+        if (data.custom_keywords && Array.isArray(data.custom_keywords)) {
+          renderKeywordsInputs(data.custom_keywords);
+        }
+        if (data.line_groups && Array.isArray(data.line_groups)) {
+          renderLineGroupsInputs(data.line_groups);
+        }
+      } catch (err) {
+        console.error("Failed to load settings", err);
+      }
+    }
+
     function renderKeywordsInputs(keywords) {
       const container = document.getElementById('keywords-container');
       const emptyText = document.getElementById('keywords-empty');
       if (!container) return;
 
-      if (document.activeElement.tagName !== 'INPUT') {
-        if (!keywords || keywords.length === 0) {
-          container.innerHTML = '';
-          emptyText.classList.remove('hidden');
-          return;
-        }
-        emptyText.classList.add('hidden');
-        container.innerHTML = keywords.map((item, idx) => `
-          <div class="flex items-center gap-2 keyword-row">
-            <input type="text" placeholder="คำเฉพาะ (เช่น สุวรรณภูมิ)" value="${item.keyword || ''}" class="keyword-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-            <input type="text" placeholder="โซนเป้าหมาย (เช่น BKK)" value="${item.zone || ''}" class="zone-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-            <button type="button" onclick="this.closest('.keyword-row').remove(); toggleKeywordsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
-              <i data-lucide="trash-2" class="h-4 w-4"></i>
-            </button>
-          </div>
-        `).join('');
-        lucide.createIcons();
+      if (!keywords || keywords.length === 0) {
+        container.innerHTML = '';
+        emptyText.classList.remove('hidden');
+        return;
       }
+      emptyText.classList.add('hidden');
+      container.innerHTML = keywords.map((item, idx) => `
+        <div class="flex items-center gap-2 keyword-row">
+          <input type="text" placeholder="คำเฉพาะ (เช่น สุวรรณภูมิ)" value="${item.keyword || ''}" class="keyword-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+          <input type="text" placeholder="โซนเป้าหมาย (เช่น BKK)" value="${item.zone || ''}" class="zone-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+          <button type="button" onclick="this.closest('.keyword-row').remove(); toggleKeywordsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+            <i data-lucide="trash-2" class="h-4 w-4"></i>
+          </button>
+        </div>
+      `).join('');
+      lucide.createIcons();
     }
 
     function toggleKeywordsEmpty() {
@@ -779,30 +786,27 @@
       }
     }
 
-    // ฟังก์ชันจัดการแสดงผลแถวกรอกข้อมูลกลุ่ม LINE
     function renderLineGroupsInputs(groups) {
       const container = document.getElementById('line-groups-container');
       const emptyText = document.getElementById('line-groups-empty');
       if (!container) return;
 
-      if (document.activeElement.tagName !== 'INPUT') {
-        if (!groups || groups.length === 0) {
-          container.innerHTML = '';
-          emptyText.classList.remove('hidden');
-          return;
-        }
-        emptyText.classList.add('hidden');
-        container.innerHTML = groups.map((item, idx) => `
-          <div class="flex items-center gap-2 line-group-row">
-            <input type="text" placeholder="ชื่อกลุ่ม (เช่น กลุ่มรถ โซน A)" value="${item.name || ''}" class="group-name-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-            <input type="text" placeholder="LINE Group ID (Cxxxxxxxx...)" value="${item.group_id || ''}" class="group-id-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs font-mono outline-none focus:border-[#2563EB]">
-            <button type="button" onclick="this.closest('.line-group-row').remove(); toggleGroupsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
-              <i data-lucide="trash-2" class="h-4 w-4"></i>
-            </button>
-          </div>
-        `).join('');
-        lucide.createIcons();
+      if (!groups || groups.length === 0) {
+        container.innerHTML = '';
+        emptyText.classList.remove('hidden');
+        return;
       }
+      emptyText.classList.add('hidden');
+      container.innerHTML = groups.map((item, idx) => `
+        <div class="flex items-center gap-2 line-group-row">
+          <input type="text" placeholder="ชื่อกลุ่ม (เช่น กลุ่มรถ โซน A)" value="${item.name || ''}" class="group-name-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+          <input type="text" placeholder="LINE Group ID (Cxxxxxxxx...)" value="${item.group_id || ''}" class="group-id-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs font-mono outline-none focus:border-[#2563EB]">
+          <button type="button" onclick="this.closest('.line-group-row').remove(); toggleGroupsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+            <i data-lucide="trash-2" class="h-4 w-4"></i>
+          </button>
+        </div>
+      `).join('');
+      lucide.createIcons();
     }
 
     function toggleGroupsEmpty() {
@@ -1005,6 +1009,7 @@
       setInterval(checkSystemHealth, 30000);
       fetchDashboardData();
       fetchGoogleSheetsData();
+      loadSettings();
       checkSystemHealth();
       lucide.createIcons();
     });
