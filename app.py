@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
-    Configuration, ApiClient, MessagingApi, PushMessageRequest, TextMessage
+    Configuration, ApiClient, MessagingApi, PushMessageRequest, ReplyMessageRequest, TextMessage
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
@@ -303,11 +303,8 @@ def add_job_to_queue(text, sender_id=None):
     job_item = {
         "id": parsed_info["id"],
         "date": parsed_info["date"] if parsed_info["date"] != "-" else datetime.datetime.now().strftime("%d/%m/%Y"),
-        
-        # เพิ่มและตรวจสอบให้แน่ใจว่าส่งข้อความต้นฉบับไปครบถ้วนทั้งสองชื่อตัวแปรเผื่อไว้
         "text": text,           
         "raw_text": text,       
-        
         "time": parsed_info["time"] if parsed_info["time"] != "-" else now_str,
         "pickup": parsed_info["pickup"],          
         "pickup_display": parsed_info["pickup"],    
@@ -411,13 +408,17 @@ def process_batch_jobs():
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    received_text = event.message.text
+    received_text = event.message.text.strip()
     source_type = event.source.type
     sender_id = None
+    target_id_for_reply = None
 
     if source_type == 'group':
         group_id = event.source.group_id
         sender_id = group_id
+        target_id_for_reply = group_id
+        
+        # จัดการบันทึก Group ID ลง Settings อัตโนมัติเมื่อบอทอยู่ในกลุ่ม
         settings = load_settings()
         existing_ids = [g.get("id") for g in settings.get("line_groups", [])]
         if group_id not in existing_ids:
@@ -427,11 +428,32 @@ def handle_message(event):
                 "enabled": True
             })
             save_settings(settings)
+            
     elif source_type == 'room':
         sender_id = event.source.room_id
+        target_id_for_reply = sender_id
     elif source_type == 'user':
         sender_id = event.source.user_id
+        target_id_for_reply = sender_id
 
+    # ตรวจสอบคำสั่งพิเศษสำหรับดึง Group/Room/User ID (พิมพ์ myid หรือ id)
+    if received_text.lower() in ["myid", "id", "groupid"]:
+        reply_token = event.reply_token
+        id_message = f"📌 รหัส ID ของแชทนี้คือ:\n{target_id_for_reply}"
+        with ApiClient(configuration) as api_client:
+            line_bot_api = MessagingApi(api_client)
+            try:
+                line_bot_api.reply_message(
+                    ReplyMessageRequest(
+                        reply_token=reply_token,
+                        messages=[TextMessage(text=id_message)]
+                    )
+                )
+            except Exception as e:
+                print(f"❌ ตอบกลับ ID ล้มเหลว: {e}")
+        return
+
+    # หากไม่ใช่คำสั่งขอ ID ให้ทำงานรับใบงานปกติ
     add_job_to_queue(received_text, sender_id=sender_id)
 
 @app.route("/")
@@ -464,24 +486,18 @@ def api_system_health():
     line_connected = False
     sheets_connected = False
 
-    # 1. เช็คสถานะ LINE BOT (ตรวจสอบ Token ด้วยการเรียกใช้ info เบื้องต้น หรือเช็คว่าตั้งค่าไว้ครบ)
     if LINE_CHANNEL_ACCESS_TOKEN and LINE_CHANNEL_SECRET:
         try:
-            with ApiClient(configuration) as api_client:
-                # ทดลองเรียก API ของ LINE เพื่อเช็คความถูกต้องของ Token
-                from linebot.v3.messaging import MessagingApi
-                # ถ้าโครงสร้าง Configuration ถูกต้องและ Token ไม่ว่างเปล่า จะถือว่าพร้อมเบื้องต้น
+            with ApiClient(configuration):
                 line_connected = True
         except Exception as e:
             print(f"LINE Bot check error: {e}")
             line_connected = False
 
-    # 2. เช็คสถานะ Google Sheets (ตรวจสอบว่าเชื่อมต่อไฟล์ Spreadsheet สำเร็จหรือไม่)
     if GOOGLE_SPREADSHEET_ID:
         try:
             client = get_sheet_client()
             if client:
-                # ทดลองเปิด Spreadsheet ด้วย ID
                 client.open_by_key(GOOGLE_SPREADSHEET_ID)
                 sheets_connected = True
         except Exception as e:
