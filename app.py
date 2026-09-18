@@ -292,7 +292,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
         "formatted_summary": formatted_summary
     }
 
-def def add_job_to_queue(text, sender_id=None):
+def add_job_to_queue(text, sender_id=None):
     global job_queue, timer_thread, timer_start_time, latest_jobs, last_sender_id
 
     now_str = datetime.datetime.now().strftime("%H:%M:%S")
