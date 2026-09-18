@@ -96,7 +96,6 @@ def map_dropoff_location(raw_dropoff):
     
     text = raw_dropoff.strip()
     lower_text = text.lower()
-    # จัดการช่องว่างส่วนเกิน
     lower_text = re.sub(r'\s+', ' ', lower_text)
 
     # 1. กลุ่มซอยที่มีเลข (ลำดับความสำคัญสูงสุด รองรับสลับหน้า-หลัง)
@@ -125,19 +124,19 @@ def map_dropoff_location(raw_dropoff):
         { "keywords": ["thonglor", "thong lor", "ทองหล่อ"], "result": "ทองหล่อ" },
         { "keywords": ["ekkamai", "เอกมัย"], "result": "เอกมัย" },
         { "keywords": ["ploenchit", "ploen chit", "เพลินจิต"], "result": "เพลินจิต" },
-        { "keywords": ["asok", "อโศก"], result: "อโศก" },
-        { "keywords": ["prompong", "phrom phong", "พร้อมพงษ์"], result: "พร้อมพงษ์" },
-        { "keywords": ["victory monument", "อนุสาวรีย์"], result: "อนุสาวรีย์" },
+        { "keywords": ["asok", "อโศก"], "result": "อโศก" },
+        { "keywords": ["prompong", "phrom phong", "พร้อมพงษ์"], "result": "พร้อมพงษ์" },
+        { "keywords": ["victory monument", "อนุสาวรีย์"], "result": "อนุสาวรีย์" },
         { "keywords": ["rangsit", "klong 1", "คลอง 1", "รังสิต"], "result": "รังสิต" },
-        { "keywords": ["ratchathewi", "ratchatevee", "ราชเทวี"], result: "ราชเทวี" },
-        { "keywords": ["pathum wan", "pathumwan", "ปทุมวัน"], result: "ปทุมวัน" },
-        { "keywords": ["huai khwang", "ห้วยขวาง"], result: "ห้วยขวาง" },
-        { "keywords": ["ratchada", "รัชดา"], result: "รัชดา" },
-        { "keywords": ["ratchayothin", "รัชโยธิน"], result: "รัชโยธิน" },
-        { "keywords": ["bang na", "bangna", "บางนา"], result: "บางนา" },
-        { "keywords": ["srinakarin", "srinagarind", "ศรีนครินทร์"], result: "ศรีนครินทร์" },
-        { "keywords": ["riverside", "charoenkrung", "เจริญกรุง"], result: "เจริญกรุง" },
-        { "keywords": ["ari", "aree", "อารีย์"], result: "อารีย์" }
+        { "keywords": ["ratchathewi", "ratchatevee", "ราชเทวี"], "result": "ราชเทวี" },
+        { "keywords": ["pathum wan", "pathumwan", "ปทุมวัน"], "result": "ปทุมวัน" },
+        { "keywords": ["huai khwang", "ห้วยขวาง"], "result": "ห้วยขวาง" },
+        { "keywords": ["ratchada", "รัชดา"], "result": "รัชดา" },
+        { "keywords": ["ratchayothin", "รัชโยธิน"], "result": "รัชโยธิน" },
+        { "keywords": ["bang na", "bangna", "บางนา"], "result": "บางนา" },
+        { "keywords": ["srinakarin", "srinagarind", "ศรีนครินทร์"], "result": "ศรีนครินทร์" },
+        { "keywords": ["riverside", "charoenkrung", "เจริญกรุง"], "result": "เจริญกรุง" },
+        { "keywords": ["ari", "aree", "อารีย์"], "result": "อารีย์" }
     ]
 
     for d in districts:
@@ -163,7 +162,6 @@ def map_dropoff_location(raw_dropoff):
             if kw in lower_text:
                 return r["result"]
 
-    # หากไม่ตรงกับเงื่อนไขใดเลย คืนค่าข้อความเดิมกลับไป (ไม่เดาพร่ำเพรื่อ)
     return text
 
 def parse_job_text(raw_text, fallback_id="F01"):
@@ -189,9 +187,8 @@ def parse_job_text(raw_text, fallback_id="F01"):
     flight_match = re.search(r'(?:【(?:航班flight|航班|flight)】|เที่ยวบิน|flight|Flight)[:\s]*([A-Za-z0-9]+)', raw_text, re.IGNORECASE)
     if not flight_match:
         flight_match = re.search(r'✈️?\s*([A-Za-z]{2}\d+|\d{3,4})', raw_text)
-    flight_val = flight_match.group(1).strip() if flight_match else "-"
+    flight_val = flight_match.group(1).strip() if flight_val == "-" else (flight_match.group(1).strip() if flight_match else "-")
 
-    # ตรวจสอบจุดรับ (Pickup)
     pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if pickup_raw_match:
         pickup_raw = pickup_raw_match.group(1).strip()
@@ -212,13 +209,11 @@ def parse_job_text(raw_text, fallback_id="F01"):
     else:
         pickup_mapped = PICKUP_MAP.get(pickup_upper, pickup_raw)
 
-    # ตรวจสอบจุดส่ง (Drop-off)
     dropoff_raw_match = re.search(r'(?:【(?:ส่งส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if dropoff_raw_match:
         dropoff_raw = dropoff_raw_match.group(1).strip()
     else:
         dropoff_raw = "-"
-        # ค้นหาคร่าวๆ จากข้อความทั้งหมดหากไม่มีคีย์เวิร์ดชัดเจน
         lines_text = raw_text.split('\n')
         if len(lines_text) > 1:
             dropoff_raw = lines_text[1].strip()
