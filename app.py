@@ -449,7 +449,7 @@ def handle_message(event):
                 line_bot_api.reply_message(
                     ReplyMessageRequest(
                         reply_token=event.reply_token,
-                        messages=[TextMessage(text=f"Group ID ของคุณคือ!\nID: {group_id}")]
+                        messages=[TextMessage(text=f"เชื่อมต่อกลุ่มนี้สำเร็จ!\nGroup ID: {group_id}")]
                     )
                 )
             return
@@ -511,7 +511,7 @@ def handle_message(event):
             except Exception as e:
                 print(f"Push summary to personal chat error: {e}")
 
-        # ถ้าส่งฟอร์มมาจากแชทส่วนตัวโดยตรง ให้ตอบกลับปิดท้ายเล็กน้อย (หรือไม่ต้องมีก็ได้)
+        # ตอบกลับแชทส่วนตัวกรณีส่งตรงหาบอท
         if source_type == 'user':
             try:
                 line_bot_api.reply_message(
@@ -523,7 +523,7 @@ def handle_message(event):
             except Exception as e:
                 print(f"Reply error: {e}")
 
-        # 3.2 เช็คกลุ่มที่เชื่อมต่อทั้งหมด แล้ว "ส่งข้อความ/ใบสรุปงานเข้าไปในกลุ่มนั้น"
+        # 3.2 เช็คกลุ่มที่เชื่อมต่อทั้งหมด แล้ว "ส่งข้อความ/ใบสรุปงานเข้าไปในกลุ่มนั้น" โดยอัตโนมัติ
         for group in connected_groups:
             g_id = group.get("group_id")
             if g_id:
@@ -537,7 +537,7 @@ def handle_message(event):
                 except Exception as e:
                     print(f"Push to group {g_id} error: {e}")
 
-    # ส่งเข้าคิวระบบหลังบ้านเพื่อบันทึกข้อมูล (เช่น Google Sheets)
+    # ส่งเข้าคิวระบบหลังบ้านเพื่อบันทึกข้อมูล
     add_job_to_queue(received_text, sender_id=user_id)
 
 @app.route("/")
