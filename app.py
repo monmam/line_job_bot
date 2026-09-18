@@ -90,7 +90,7 @@ def save_settings(data):
         json.dump(current, f, ensure_ascii=False, indent=2)
 
 def map_dropoff_location(raw_dropoff):
-    """แปลงจุดส่งเป็นเขต/พื้นที่/ถนน ตามกฎที่กำหนดอย่างแม่นยำ"""
+    """แปลงจุดส่งตามลำดับเงื่อนไข: ซอยมีเลข -> ย่านสำคัญ -> ถนนสายหลัก พร้อมรองรับชื่อสถานที่/โรงแรม"""
     if not raw_dropoff or raw_dropoff == "-":
         return "-"
     
@@ -98,7 +98,7 @@ def map_dropoff_location(raw_dropoff):
     lower_text = text.lower()
     lower_text = re.sub(r'\s+', ' ', lower_text)
 
-    # 1. กลุ่มซอยที่มีเลข (ตรวจสอบเลขซอยของถนนหลัก)
+    # 1. ตรวจจับ “ซอยที่มีเลข” (สุขุมวิท, พหลโยธิน, เพชรบุรี)
     soi_patterns = [
         { "regex": r'(?:sukhumvit|สุขุมวิท).*(?:soi|ซอย)\s*(\d+)', "template": "สุขุมวิท $1" },
         { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:sukhumvit|สุขุมวิท)', "template": "สุขุมวิท $1" },
@@ -116,7 +116,7 @@ def map_dropoff_location(raw_dropoff):
         if match:
             return p["template"].replace("$1", match.group(1))
 
-    # 2. ย่านสำคัญ / แหล่งท่องเที่ยว / ย่านโรงแรม (ใช้การเช็กคำแบบเจาะจงเพื่อกันตัวอักษรเกิน)
+    # 2. ตรวจจับ “ย่านสำคัญ / แหล่งท่องเที่ยว / ย่านโรงแรม” (ไม่รวม SIAM กับ เกษมสันต์ปนกัน)
     districts = [
         { "keywords": ["pratunam", "ประตูน้ำ"], "result": "ประตูน้ำ" },
         { "keywords": ["khao san", "khaosan", "ข้าวสาร"], "result": "ข้าวสาร" },
@@ -136,7 +136,9 @@ def map_dropoff_location(raw_dropoff):
         { "keywords": ["ratchayothin", "รัชโยธิน"], "result": "รัชโยธิน" },
         { "keywords": ["bang na", "bangna", "บางนา"], "result": "บางนา" },
         { "keywords": ["srinakarin", "srinagarind", "ศรีนครินทร์"], "result": "ศรีนครินทร์" },
-        { "keywords": ["riverside", "charoenkrung", "เจริญกรุง"], "result": "เจริญกรุง" }
+        { "keywords": ["riverside", "charoenkrung", "เจริญกรุง"], "result": "เจริญกรุง" },
+        { "keywords": ["siam"], "result": "สยาม" },
+        { "keywords": ["kasem san", "เกษมสันต์"], "result": "เกษมสันต์" }
     ]
 
     for d in districts:
@@ -144,12 +146,12 @@ def map_dropoff_location(raw_dropoff):
             if kw in lower_text:
                 return d["result"]
 
-    # 3. ถนนสายหลัก
+    # 3. ตรวจจับ “ถนนสายหลัก”
     main_roads = [
         { "keywords": ["witthayu", "wireless", "วิทยุ"], "result": "วิทยุ" },
         { "keywords": ["sathon", "sathorn", "สาทร"], "result": "สาทร" },
         { "keywords": ["silom", "สีลม"], "result": "สีลม" },
-        { "keywords": ["rama 9", "rama ix", "พระราม 9"], "result": "พระราม 9" },
+        { "keywords": ["rama 9", "rama ix", "พระราม 9"], "result": "พระราม 4", "result": "พระราม 9" },
         { "keywords": ["rama 4", "rama iv", "พระราม 4"], "result": "พระราม 4" },
         { "keywords": ["ladprao", "lat phrao", "ลาดพร้าว"], "result": "ลาดพร้าว" },
         { "keywords": ["sukhumvit", "สุขุมวิท"], "result": "สุขุมวิท" },
@@ -162,12 +164,16 @@ def map_dropoff_location(raw_dropoff):
             if kw in lower_text:
                 return r["result"]
 
-    # หากไม่ตรงเงื่อนไขใดเลย ให้ตัดเอาเฉพาะข้อความสั้นๆ หน้าเครื่องหมายคอมมา เพื่อไม่ให้แสดงผลยาวเกินไป
-    clean_text = text.split(',')[0].strip()
-    return clean_text if len(clean_text) < 30 else clean_text[:30] + "..."
+    # กรณีเป็นชื่อโรงแรม/สถานที่เฉพาะ (เช่น Best Western Chatuchak หรือมีคำว่าถนน/Road กำกับ)
+    if "best western chatuchak" in lower_text:
+        return "แบสท์ เวสเทิร์น จตุจักร"
+    
+    # ดึงเฉพาะข้อความส่วนหน้าก่อนเครื่องหมายวงเล็บหรือคอมมา เพื่อความสะอาด
+    clean_text = text.split(',')[0].split('(')[0].strip()
+    return clean_text if len(clean_text) < 35 else clean_text[:35] + "..."
 
 def parse_job_text(raw_text, fallback_id="F01"):
-    """แกะข้อมูลใบงาน รองรับจุดรับ จุดส่ง และแปลงค่าอัตโนมัติ (เวอร์ชันอัปเดต)"""
+    """แกะข้อมูลใบงาน รองรับจุดรับ จุดส่ง และแปลงค่าอัตโนมัติ"""
     if not raw_text:
         return {}
 
@@ -218,11 +224,12 @@ def parse_job_text(raw_text, fallback_id="F01"):
     else:
         pickup_mapped = PICKUP_MAP.get(pickup_upper, pickup_raw)
 
-    # 6. จุดส่ง (Dropoff) - รองรับแท็ก 【送ส่ง】 และตัดวงเล็บพิกัดออกอย่างแม่นยำ
+    # 6. จุดส่ง (Dropoff)
     dropoff_raw = "-"
     dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if dropoff_raw_match:
         dropoff_raw = dropoff_raw_match.group(1).strip()
+        # ตัดวงเล็บพิกัดท้ายข้อความออก
         dropoff_raw = re.sub(r'[\),].*$', '', dropoff_raw).strip()
     else:
         for line in lines:
@@ -272,9 +279,6 @@ def parse_job_text(raw_text, fallback_id="F01"):
         "formatted_summary": formatted_summary
     }
 
-def is_duplicate(new_text):
-    return False
-
 def add_job_to_queue(text, sender_id=None):
     global job_queue, timer_thread, timer_start_time, latest_jobs, last_sender_id
 
@@ -317,18 +321,21 @@ def add_job_to_queue(text, sender_id=None):
     return True
 
 def generate_batch_summary():
+    """สร้างข้อความสรุปพร้อมเว้นบรรทัดระหว่างรายการตามที่อัปเดต"""
     if not job_queue:
         return ""
 
     first_date = job_queue[0].get("date", datetime.datetime.now().strftime("%d/%m/%Y"))
     
     if len(job_queue) > 1:
-        lines = [f"📅 {first_date}"]
-        for job in job_queue:
+        lines = [f"📅 {first_date}", ""]
+        for i, job in enumerate(job_queue):
             lines.append(job["formatted_summary"])
+            if i < len(job_queue) - 1:
+                lines.append("") # เว้นบรรทัดระหว่างรายการ
         return "\n".join(lines)
     else:
-        return job_queue[0]["formatted_summary"]
+        return f"📅 {first_date}\n\n{job_queue[0]['formatted_summary']}"
 
 def process_batch_jobs():
     global job_queue, timer_thread, timer_start_time, last_sender_id
@@ -341,9 +348,11 @@ def process_batch_jobs():
     current_jobs = [job["text"] for job in job_queue]
 
     if summary_text:
+        # บันทึกข้อมูลลง Google Sheets ทั้ง RAW_JOBS และ SUMMARY ตามโมดูลที่ตั้งค่าไว้
         if GOOGLE_SPREADSHEET_ID:
             try:
                 save_to_google_sheets(GOOGLE_SPREADSHEET_ID, current_jobs, job_queue)
+                print("✅ บันทึกข้อมูลลง Google Sheets (RAW_JOBS / SUMMARY) สำเร็จ")
             except Exception as e:
                 print(f"❌ บันทึก Google Sheets ล้มเหลว: {e}")
 
@@ -363,7 +372,7 @@ def process_batch_jobs():
                         )
                         line_bot_api.push_message(push_request)
                     except Exception as e:
-                        print(f"❌ ส่งข้อความล้มเหลว: {e}")
+                        print(f"❌ ส่งข้อความไปยังกลุ่ม LINE ล้มเหลว: {e}")
             else:
                 if target_sender_id:
                     try:
