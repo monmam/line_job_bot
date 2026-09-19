@@ -308,11 +308,8 @@ def parse_job_text(raw_text, fallback_id="F01"):
 
     lines = [line.strip() for line in raw_text.strip().split('\n') if line.strip()]
     
+    # ปรับให้ดึงรหัส F ตามจริง ถ้าไม่มีค่อยใช้ fallback_id ที่รันให้อัตโนมัติ
     id_match = re.search(r'\b(F\d+)\b', raw_text, re.IGNORECASE)
-    if not id_match:
-        id_match = re.search(r'(?:รหัสใบงาน|Job ID|ID)[:\s]*([A-Za-z0-9_-]+)', raw_text, re.IGNORECASE)
-    if not id_match and lines:
-        id_match = re.search(r'^([A-Za-z0-9_-]+)', lines[0])
     job_id = id_match.group(1).strip() if id_match else fallback_id
 
     date_match = re.search(r'(?:【(?:日期วันที่|日期|วันที่)】|วันที่|Date)[:\s]*([\d/\-]+)', raw_text, re.IGNORECASE)
@@ -399,7 +396,10 @@ def add_job_to_queue(text, sender_id=None):
     global job_queue, timer_thread, timer_start_time, latest_jobs, last_sender_id
 
     now_str = datetime.datetime.now().strftime("%H:%M:%S")
-    fallback_id = f"F{len(latest_jobs) + 1:02d}"
+    
+    # คำนวณรหัสใบงานให้อัตโนมัติตามลำดับในคิวปัจจุบัน เพื่อป้องกัน F ชนกัน
+    next_seq = len(job_queue) + len(latest_jobs) + 1
+    fallback_id = f"F{next_seq:02d}"
     
     parsed_info = parse_job_text(text, fallback_id=fallback_id)
 
@@ -426,7 +426,7 @@ def add_job_to_queue(text, sender_id=None):
         last_sender_id = sender_id
 
     latest_jobs.insert(0, job_item)
-    latest_jobs = latest_jobs[:30]
+    latest_jobs = latest_jobs[:50] # ขยายประวัติเก็บไว้รองรับหลายใบ
 
     if len(job_queue) == 1 and timer_thread is None:
         settings = load_settings()
@@ -444,7 +444,6 @@ def generate_batch_summary():
     date_groups = {}
     for job in job_queue:
         raw_date = job.get("date", datetime.datetime.now().strftime("%d/%m/%Y"))
-        # แปลงรูปแบบวันที่ให้เป็นมาตรฐานเดียวกัน (ตัดเลข 0 ส่วนเกินออกเพื่อไม่ให้แยกกลุ่มซ้ำ)
         try:
             parsed_d = datetime.datetime.strptime(raw_date.replace('-', '/'), "%d/%m/%Y")
             job_date = parsed_d.strftime("%d/%m/%Y")
@@ -462,7 +461,7 @@ def generate_batch_summary():
         blocks.append(f"📅 {d}")
         blocks.append("")
         
-        # จัดเรียงใบงานตามรหัส ID (เช่น F01, F02, F03...)
+        # จัดเรียงใบงานตามรหัส ID เสมอ (F01, F02, F03...)
         sorted_jobs = sorted(date_groups[d], key=lambda x: x.get("id", ""))
         
         for i, job in enumerate(sorted_jobs):
