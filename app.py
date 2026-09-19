@@ -42,14 +42,175 @@ timer_start_time = None
 latest_jobs = []        
 last_sender_id = None   
 
-# Dictionary สำหรับ Map จุดรับ จุดส่ง ขนาดรถ และราคาตามกฎ
-PICKUP_MAP = {
-    "BKK": "แอร์สุ",
-    "BKK T1": "แอร์สุ",
-    "DMK": "แอร์ดอน",
-    "DMK T1": "แอร์ดอน"
+# พจนานุกรมรายชื่อถนนหลัก (อังกฤษ = ไทย)
+MAIN_ROADS_DICT = {
+    "New Petchaburi": "เพชรบุรีตัดใหม่",
+    "Sukhumvit": "สุขุมวิท",
+    "Phaholyothin": "พหลโยธิน",
+    "Petchaburi": "เพชรบุรี",
+    "Rama I": "พระรามที่ 1",
+    "Rama II": "พระรามที่ 2",
+    "Rama III": "พระรามที่ 3",
+    "Rama IV": "พระรามที่ 4",
+    "Rama V": "พระรามที่ 5",
+    "Rama VI": "พระรามที่ 6",
+    "Rama IX": "พระรามที่ 9",
+    "Silom": "สีลม",
+    "North Sathorn": "สาทรเหนือ",
+    "South Sathorn": "สาทรใต้",
+    "Surawong": "สุรวงศ์",
+    "Ratchadamnoen Klang": "ราชดำเนินกลาง",
+    "Ratchadamnoen Nok": "ราชดำเนินนอก",
+    "Ratchadamnoen Nai": "ราชดำเนินใน",
+    "Charoen Krung": "เจริญกรุง",
+    "Bamrung Mueang": "บำรุงเมือง",
+    "Din So": "ดินสอ",
+    "Tanao": "ตะนาว",
+    "Khaosan": "ข้าวสาร",
+    "Phra Sumen": "พระสุเมรุ",
+    "Samsen": "สามเสน",
+    "Witthayu": "วิทยุ",
+    "Lang Suan": "หลังสวน",
+    "Chit Lom": "ชิดลม",
+    "Ploenchit": "เพลินจิต",
+    "Ratchadamri": "ราชดำริ",
+    "Henri Dunant": "อังรีดูนังต์",
+    "Phaya Thai": "พญาไท",
+    "Banthat Thong": "บรรทัดทอง",
+    "Chan": "จันทน์",
+    "Sathu Pradit": "สาธุประดิษฐ์",
+    "Nang Linchi": "นางลิ้นจี่",
+    "Chuea Phloeng": "เชื้อเพลิง",
+    "Naradhiwas Rajanagarindra": "นราธิวาสราชนครินทร์",
+    "Ratchadaphisek": "รัชดาภิเษก",
+    "Asok Montri": "อโศกมนตรี",
+    "Thong Lo": "ทองหล่อ",
+    "Ekkamai": "เอกมัย",
+    "Pridi Banomyong": "ปรีดี พนมยงค์",
+    "On Nut": "อ่อนนุช",
+    "Bangna-Trat": "บางนา-ตราด",
+    "Srinakarin": "ศรีนครินทร์",
+    "Phatthanakan": "พัฒนาการ",
+    "Ramkhamhaeng": "รามคำแหง",
+    "Lat Phrao": "ลาดพร้าว",
+    "Pradit Manutham": "ประดิษฐ์มนูธรรม",
+    "Ram Inthra": "รามอินทรา",
+    "Chaeng Watthana": "แจ้งวัฒนะ",
+    "Ngam Wong Wan": "งามวงศ์วาน",
+    "Tiwanon": "ติวานนท์",
+    "Prachachuen": "ประชาชื่น",
+    "Kamphaeng Phet": "กำแพงเพชร",
+    "Vibhavadi Rangsit": "วิภาวดีรังสิต",
+    "Sutthisan Winitchai": "สุทธิสารวินิจฉัย",
+    "Pracha Uthit": "ประชาอุทิศ",
+    "Phutthamonthon Sai 1": "พุทธมณฑลสาย 1",
+    "Phutthamonthon Sai 2": "พุทธมณฑลสาย 2",
+    "Phutthamonthon Sai 3": "พุทธมณฑลสาย 3",
+    "Phutthamonthon Sai 4": "พุทธมณฑลสาย 4",
+    "Borommaratchachonnani": "บรมราชชนนี",
+    "Charan Sanitwong": "จรัญสนิทวงศ์",
+    "Arun Amarin": "อรุณอมรินทร์",
+    "Itsaraphap": "อิสรภาพ",
+    "Prachathipok": "ประชาธิปก",
+    "Somdej Phra Chao Tak Sin": "สมเด็จพระเจ้าตากสิน",
+    "Charoen Nakhon": "เจริญนคร",
+    "Rat Burana": "ราษฎร์บูรณะ",
+    "Suksawat": "สุขสวัสดิ์",
+    "Ekkachai": "เอกชัย",
+    "Bang Khun Thian-Cha Thale": "บางขุนเทียน-ชายทะเล",
+    "Kanchanaphisek": "กาญจนาภิเษก",
+    "Outer Ring Road": "วงแหวนรอบนอก",
+    "Phrannok": "พรานนก"
 }
 
+# พจนานุกรมรายชื่อย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่ (Roads Extension)
+MAJOR_AREAS_DICT = {
+    "Sukhumvit Road": "ถนนสุขุมวิท",
+    "Phahonyothin Road": "ถนนพหลโยธิน",
+    "Phetchaburi Road": "ถนนเพชรบุรี",
+    "Rama 1 Road": "ถนนพระรามที่ 1",
+    "Rama 2 Road": "ถนนพระรามที่ 2",
+    "Rama 3 Road": "ถนนพระรามที่ 3",
+    "Rama 4 Road": "ถนนพระรามที่ 4",
+    "Rama 5 Road": "ถนนพระรามที่ 5",
+    "Rama 6 Road": "ถนนพระรามที่ 6",
+    "Rama 9 Road": "ถนนพระรามที่ 9",
+    "Silom Road": "ถนนสีลม",
+    "North Sathorn Road": "ถนนสาทรเหนือ",
+    "South Sathorn Road": "ถนนสาทรใต้",
+    "Surawong Road": "ถนนสุรวงศ์",
+    "Rajdamnoen Klang Road": "ถนนราชดำเนินกลาง",
+    "Rajdamnoen Nok Road": "ถนนราชดำเนินนอก",
+    "Rajdamnoen Nai Road": "ถนนราชดำเนินใน",
+    "Sanam Chai Road": "ถนนสนามไชย",
+    "Na Phra Lan Road": "ถนนหน้าพระลาน",
+    "Na Phra That Road": "ถนนหน้าพระธาตุ",
+    "Charoen Krung Road": "ถนนเจริญกรุง",
+    "Bamrung Mueang Road": "ถนนบำรุงเมือง",
+    "Fueang Nakhon Road": "ถนนเฟื่องนคร",
+    "Dinso Road": "ถนนดินสอ",
+    "Tanao Road": "ถนนตะนาว",
+    "Chakkraphong Road": "ถนนจักรพงษ์",
+    "Khaosan Road": "ถนนข้าวสาร",
+    "Phra Sumen Road": "ถนนพระสุเมรุ",
+    "Sam Sen Road": "ถนนสามเสน",
+    "Witthayu Road": "ถนนวิทยุ",
+    "Lang Suan Road": "ถนนหลังสวน",
+    "Chit Lom Road": "ถนนชิดลม",
+    "Ploenchit Road": "ถนนเพลินจิต",
+    "Ratchadamri Road": "ถนนราชดำริ",
+    "Henri Dunant Road": "ถนนอังรีดูนังต์",
+    "Phaya Thai Road": "ถนนพญาไท",
+    "Banthat Thong Road": "ถนนบรรทัดทอง",
+    "Rong Mueang Road": "ถนนรองเมือง",
+    "Chan Road": "ถนนจันทน์",
+    "Sathu Pradit Road": "ถนนสาธุประดิษฐ์",
+    "Nang Linchi Road": "ถนนนางลิ้นจี่",
+    "Chuea Phloeng Road": "ถนนเชื้อเพลิง",
+    "Yen Chit Road": "ถนนเย็นจิต",
+    "Naradhiwas Rajanagarindra Road": "ถนนนราธิวาสราชนครินทร์",
+    "Ratchadaphisek Road": "ถนนรัชดาภิเษก",
+    "Asok Montri Road": "ถนนอโศกมนตรี",
+    "Thong Lo Road": "ถนนทองหล่อ",
+    "Ekkamai Road": "ถนนเอกมัย",
+    "Pridi Banomyong Road": "ถนนปรีดี พนมยงค์",
+    "On Nut Road": "ถนนอ่อนนุช",
+    "Bang Na-Trat Road": "ถนนบางนา-ตราด",
+    "Srinakarin Road": "ถนนศรีนครินทร์",
+    "Phatthanakan Road": "ถนนพัฒนาการ",
+    "Ramkhamhaeng Road": "ถนนรามคำแหง",
+    "Lat Phrao Road": "ถนนลาดพร้าว",
+    "Pradit Manutham Road": "ถนนประดิษฐ์มนูธรรม",
+    "Ram Inthra Road": "ถนนรามอินทรา",
+    "Chaeng Watthana Road": "ถนนแจ้งวัฒนะ",
+    "Ngam Wong Wan Road": "ถนนงามวงศ์วาน",
+    "Tiwanon Road": "ถนนติวานนท์",
+    "Pracha Chuen Road": "ถนนประชาชื่น",
+    "Kamphaeng Phet Road": "ถนนกำแพงเพชร",
+    "Vibhavadi Rangsit Road": "ถนนวิภาวดีรังสิต",
+    "Sutthisan Winitchai Road": "ถนนสุทธิสารวินิจฉัย",
+    "Pracha Uthit Road": "ถนนประชาอุทิศ",
+    "Phutthamonthon Sai 1 Road": "ถนนพุทธมณฑลสาย 1",
+    "Phutthamonthon Sai 2 Road": "ถนนพุทธมณฑลสาย 2",
+    "Phutthamonthon Sai 3 Road": "ถนนพุทธมณฑลสาย 3",
+    "Phutthamonthon Sai 4 Road": "ถนนพุทธมณฑลสาย 4",
+    "Borommaratchachonnani Road": "ถนนบรมราชชนนี",
+    "Charan Sanitwong Road": "ถนนจรัญสนิทวงศ์",
+    "Arun Amarin Road": "ถนนอรุณอมรินทร์",
+    "Issaraphap Road": "ถนนอิสรภาพ",
+    "Prachathipok Road": "ถนนประชาธิปก",
+    "Somdet Phra Chao Tak Sin Road": "ถนนสมเด็จพระเจ้าตากสิน",
+    "Charoen Nakhon Road": "ถนนเจริญนคร",
+    "Rat Burana Road": "ถนนราษฎร์บูรณะ",
+    "Suksawat Road": "ถนนสุขสวัสดิ์",
+    "Ekkachai Road": "ถนนเอกชัย",
+    "Bang Khun Thian-Chai Thale Road": "ถนนบางขุนเทียน-ชายทะเล",
+    "Kanchanaphisek Road": "ถนนกาญจนาภิเษก",
+    "Outer Ring Road": "ถนนวงแหวนรอบนอก",
+    "Phrannok Road": "ถนนพรานนก"
+}
+
+# Dictionary สำหรับ Map จุดรับ จุดส่ง ขนาดรถ และราคาตามกฎ
 CAR_PRICING_MAP = {
     "5 SEAT": {"code": "5S", "price": "380"},
     "5S": {"code": "5S", "price": "380"},
@@ -73,37 +234,30 @@ def summarize_jobs_with_ai(jobs_text):
         print(f"AI Summary Error: {e}")
         return jobs_text
 
-def extract_pickup_dropoff_with_gemini(raw_text):
-    """ให้ Gemini AI วิเคราะห์ข้อความใบงานเพื่อดึงจุดรับและจุดส่งที่สะอาดและถูกต้องแม่นยำที่สุด"""
+def smart_parse_location_with_gemini(raw_location):
+    """แปลงจุดรับ-จุดส่งด้วย AI ให้สั้นกระชับ โดยอ้างอิงจากรายชื่อถนนหลักและย่านสำคัญ"""
+    if not raw_location or raw_location == "-":
+        return "-"
+    
     if not client:
-        return "-", "-"
+        return raw_location
+
     try:
         prompt = f"""
-คุณเป็นระบบ AI ผู้เชี่ยวชาญการจัดการข้อมูลการเดินทางในกรุงเทพฯ จงวิเคราะห์ข้อความใบงานด้านล่างนี้ แล้วแยก "จุดรับ" (Pickup) และ "จุดส่ง" (Dropoff) ให้ถูกต้อง
+คุณเป็นระบบ AI ทำหน้าที่แปลงชื่อโรงแรมหรือสถานที่ยาวๆ ให้เป็น **"ชื่อย่าน หรือ ถนนหลัก หรือ ซอยสำคัญ"** ตามมาตรฐานรายชื่อถนนหลักในกรุงเทพฯ ให้มีความสั้นที่สุด ห้ามมีความยาวเกิน 3-5 คำเด็ดขาด และห้ามใส่ชื่อเต็มของโรงแรมเด็ดขาด
 
-**กฎเหล็กในการแปลงชื่อสถานที่:**
-1. หากเป็นสนามบิน ให้ใช้คำว่า "แอร์ดอน" (สำหรับ DMK) หรือ "แอร์สุ" (สำหรับ BKK) เท่านั้น
-2. สำหรับสถานที่ทั่วไป ให้ดึงเฉพาะ: **ถนนหลัก**, **ซอยที่มีเลข** (เช่น สุขุมวิท 39, พหลโยธิน 3), หรือ **ย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่** (เช่น ข้าวสาร, สยาม, สาทร, เพชรบุรี, พญาไท)
-3. **ห้ามมีชื่อโรงแรมหรือชื่อตึกเต็มๆ หลุดมาเด็ดขาด** (ให้ตัดคำว่า Holiday Inn, Eastin Grand, The Standard, Anantara ทิ้งทั้งหมด)
-4. ความยาวแต่ละจุดต้องสั้นกระชับไม่เกิน 2-4 คำเท่านั้น
-
-ข้อความใบงาน:
-{raw_text}
-
-โปรดตอบกลับในรูปแบบ JSON เท่านั้น โดยมี Key เป็น "pickup" และ "dropoff" เช่น:
-{{"pickup": "แอร์ดอน", "dropoff": "สยาม"}}
+สถานที่ที่ต้องแปลง: "{raw_location}"
 """
         response = client.models.generate_content(
             model='gemini-2.5-flash',
-            contents=prompt,
-            config={"response_mime_type": "application/json"}
+            contents=prompt
         )
-        data = json.loads(response.text.strip())
-        return data.get("pickup", "-"), data.get("dropoff", "-")
+        result = response.text.strip()
+        return result if result else raw_location
     except Exception as e:
-        print(f"Gemini Extract Error: {e}")
-        return "-", "-"
-        
+        print(f"Gemini API Error (Fallback to original): {e}")
+        return raw_location
+
 def parse_job_line(line_text):
     """ฟังก์ชันแยกและจัดการจุดรับ-จุดส่งจากข้อความดิบ"""
     parts = line_text.split('-')
@@ -167,7 +321,7 @@ def save_settings(data):
         json.dump(current, f, ensure_ascii=False, indent=2)
 
 def parse_job_text(raw_text, fallback_id="F01"):
-    """แกะข้อมูลใบงานและดึงจุดรับ-จุดส่งด้วย Gemini AI อย่างแม่นยำ"""
+    """แกะข้อมูลใบงาน รองรับการแยกจุดรับ-จุดส่ง และแปลงค่าอัตโนมัติด้วย Gemini AI"""
     if not raw_text:
         return {}
 
@@ -184,7 +338,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
     date_val = date_match.group(1).strip() if date_match else "-"
 
     # 3. เวลา (Time)
-    time_match = re.search(r'(?:【(?:เวลาเวลา|เวลา|시간시간|시간)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
+    time_match = re.search(r'(?:【(?:เวลาเวลา|เวลา|时间时间|时间)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
     if not time_match:
         time_match = re.search(r'(\d{2}:\d{2})', raw_text)
     time_val = time_match.group(1).strip() if time_match else "-"
@@ -197,8 +351,42 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if flight_match:
         flight_val = flight_match.group(1).strip()
 
-    # 5. ใช้ AI สกัดจุดรับและจุดส่งแบบแม่นยำ
-    pickup_mapped, dropoff_mapped = extract_pickup_dropoff_with_gemini(raw_text)
+    # 5. จุดรับ (Pickup) และ จุดส่ง (Dropoff)
+    pickup_raw = "-"
+    dropoff_raw = "-"
+    pickup_mapped = "-"
+    dropoff_mapped = "-"
+    
+    route_line = ""
+    for line in lines:
+        if "-" in line and not any(k in line for k in ["【", "รหัส", "Order"]):
+            route_line = line
+            break
+            
+    if route_line:
+        parts = route_line.split("-", 1)
+        pickup_raw = parts[0].strip()
+        dropoff_raw = parts[1].strip()
+        dropoff_raw = re.sub(r'[\),].*$', '', dropoff_raw).strip()
+        
+        pickup_mapped, dropoff_mapped = parse_job_line(route_line)
+    else:
+        pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
+        if pickup_raw_match:
+            pickup_raw = pickup_raw_match.group(1).strip()
+        dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
+        if dropoff_raw_match:
+            dropoff_raw = dropoff_raw_match.group(1).strip()
+            
+        pickup_mapped = smart_parse_location_with_gemini(pickup_raw)
+        dropoff_mapped = smart_parse_location_with_gemini(dropoff_raw)
+
+    # ปรับแต่งจุดรับให้เป็นมาตรฐานถ้าเป็นสนามบิน
+    pickup_upper = pickup_raw.upper().strip()
+    if any(k in pickup_upper for k in ["DMK", "DON MUEANG", "แอร์ดอน"]):
+        pickup_mapped = "แอร์ดอน"
+    elif any(k in pickup_upper for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ"]):
+        pickup_mapped = "แอร์สุ"
 
     # 6. ขนาดรถและราคา (Car & Price)
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
@@ -227,9 +415,9 @@ def parse_job_text(raw_text, fallback_id="F01"):
         "id": job_id,
         "date": date_val,
         "time": time_val,
-        "pickup_raw": pickup_mapped,
+        "pickup_raw": pickup_raw,
         "pickup": pickup_mapped,
-        "dropoff_raw": dropoff_mapped,
+        "dropoff_raw": dropoff_raw,
         "dropoff": dropoff_mapped,
         "flight": flight_val,
         "car_code": car_code,
