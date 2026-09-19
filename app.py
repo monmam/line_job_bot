@@ -37,15 +37,14 @@ timer_start_time = None
 latest_jobs = []        
 last_sender_id = None   
 
-# พจนานุกรมรายชื่อถนนหลัก (อังกฤษ = ไทย)
-MAIN_ROADS_DICT = {
+# ค่าเริ่มต้นพจนานุกรมรายชื่อถนนหลัก (อังกฤษ = ไทย)
+DEFAULT_MAIN_ROADS_DICT = {
     "New Petchaburi": "เพชรบุรีตัดใหม่",
     "Sukhumvit": "สุขุมวิท",
     "Phaholyothin": "พหลโยธิน",
     "Petchaburi": "เพชรบุรี",
     "Phetchaburi Rd": "เพชรบุรี",
     "Phetburi": "เพชรบุรี",
-    "Phra Nakhon": "พระนคร",
     "Rama 1": "พระรามที่ 1",
     "Rama 2": "พระรามที่ 2",
     "Rama 3": "พระรามที่ 3",
@@ -124,8 +123,8 @@ MAIN_ROADS_DICT = {
     "Phrannok": "พรานนก"
 }
 
-# พจนานุกรมรายชื่อย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่
-MAJOR_AREAS_DICT = {
+# ค่าเริ่มต้นพจนานุกรมรายชื่อย่านสำคัญ
+DEFAULT_MAJOR_AREAS_DICT = {
     "Sukhumvit Road": "ถนนสุขุมวิท",
     "Khlong San": "คลองสาน",
     "Phahonyothin": "ถนนพหลโยธิน",
@@ -158,67 +157,13 @@ CAR_PRICING_MAP = {
     "CAMRY/7S": {"code": "7S", "price": "480"}
 }
 
-def parse_location_rule_based(raw_location):
-    """แปลงจุดรับ-จุดส่งด้วยกฎ และตัดคำว่าซอยกับตัวเลขออกให้เหลือแค่ชื่อถนน/ย่าน"""
-    if not raw_location or raw_location == "-":
-        return "-"
-    
-    cleaned = raw_location.strip()
-    upper_loc = cleaned.upper()
-    
-    # 1. ตรวจจับสนามบินดอนเมือง และรูปแบบ DMK T1-T5 เป็นกรณีพิเศษ
-    if any(k in upper_loc for k in ["DMK", "DON MUEANG", "แอร์ดอน"]) or re.search(r'DMK\s*T[1-5]', upper_loc):
-        return "แอร์ดอน"
-    
-    # 2. ตรวจจับสนามบินสุวรรณภูมิ
-    elif any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ"]):
-        return "แอร์สุ"
-
-    # 3. ตรวจจับ Sukhumvit ตามด้วยเลขซอย (เช่น Sukhumvit 15, Sukhumvit 20) ให้กลายเป็น สุขุมวิท
-    if re.search(r'\bSukhumvit\s*\d+\b', cleaned, flags=re.IGNORECASE):
-        return "สุขุมวิท"
-
-    matched_th_road = ""
-
-    # 4. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT (ทั้งอังกฤษและไทย)
-    for eng_road, th_road in MAIN_ROADS_DICT.items():
-        if eng_road.lower() in cleaned.lower() or th_road in cleaned:
-            matched_th_road = th_road.strip()
-            break
-
-    # 5. หากไม่เจอในถนนหลัก ลองเช็คใน MAJOR_AREAS_DICT
-    if not matched_th_road:
-        for area_eng, area_th in MAJOR_AREAS_DICT.items():
-            if area_eng.lower() in cleaned.lower() or area_th in cleaned:
-                matched_th_road = area_th.strip()
-                break
-
-    # ถ้าเจอถนนหลักหรือย่าน ให้คืนค่าเฉพาะชื่อนั้นเลย (ตัดซอยและตัวเลขออกทั้งหมด)
-    if matched_th_road:
-        return matched_th_road
-
-    # หากไม่ตรงในพจนานุกรม ให้ตัดคำว่า "ซอย [ตัวเลข]" ออกจากข้อความเดิมด้วย Regex ทิ้งไป
-    cleaned_no_soi = re.sub(r'(?:ซอย|soi)\s*\d+', '', cleaned, flags=re.IGNORECASE).strip()
-    
-    return cleaned_no_soi if cleaned_no_soi else cleaned
-
-def parse_job_line(line_text):
-    parts = line_text.split('-')
-    if len(parts) >= 2:
-        pickup_raw = parts[0].strip()
-        dropoff_raw = parts[1].strip()
-        
-        pickup_clean = parse_location_rule_based(pickup_raw)
-        dropoff_clean = parse_location_rule_based(dropoff_raw)
-        
-        return pickup_clean, dropoff_clean
-    return line_text, "-"
-
 def load_settings():
     default_settings = {
         "wait_seconds": 120,
         "line_groups": [],
         "custom_keywords": [],
+        "main_roads_dict": DEFAULT_MAIN_ROADS_DICT,
+        "major_areas_dict": DEFAULT_MAJOR_AREAS_DICT,
         "custom_locations": {
             "metropole": "เพชรบุรีตัดใหม่",
             "c u inn": "จตุจักร"
@@ -234,6 +179,10 @@ def load_settings():
                     data["line_groups"] = []
                 if "custom_keywords" not in data:
                     data["custom_keywords"] = []
+                if "main_roads_dict" not in data:
+                    data["main_roads_dict"] = DEFAULT_MAIN_ROADS_DICT
+                if "major_areas_dict" not in data:
+                    data["major_areas_dict"] = DEFAULT_MAJOR_AREAS_DICT
                 if "custom_locations" not in data:
                     data["custom_locations"] = default_settings["custom_locations"]
                 return data
@@ -257,11 +206,77 @@ def save_settings(data):
     if "custom_keywords" in data:
         current["custom_keywords"] = data["custom_keywords"]
 
+    if "main_roads_dict" in data:
+        current["main_roads_dict"] = data["main_roads_dict"]
+
+    if "major_areas_dict" in data:
+        current["major_areas_dict"] = data["major_areas_dict"]
+
     if "custom_locations" in data:
         current["custom_locations"] = data["custom_locations"]
     
     with open("settings.json", "w", encoding="utf-8") as f:
         json.dump(current, f, ensure_ascii=False, indent=2)
+
+def parse_location_rule_based(raw_location):
+    """แปลงจุดรับ-จุดส่งด้วยกฎ และดึงพจนานุกรมล่าสุดจาก Settings"""
+    if not raw_location or raw_location == "-":
+        return "-"
+    
+    cleaned = raw_location.strip()
+    upper_loc = cleaned.upper()
+    
+    # ดึงค่าพจนานุกรมปัจจุบันจาก settings
+    settings = load_settings()
+    current_main_roads = settings.get("main_roads_dict", DEFAULT_MAIN_ROADS_DICT)
+    current_major_areas = settings.get("major_areas_dict", DEFAULT_MAJOR_AREAS_DICT)
+
+    # 1. ตรวจจับสนามบินดอนเมือง
+    if any(k in upper_loc for k in ["DMK", "DON MUEANG", "แอร์ดอน"]) or re.search(r'DMK\s*T[1-5]', upper_loc):
+        return "แอร์ดอน"
+    
+    # 2. ตรวจจับสนามบินสุวรรณภูมิ
+    elif any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ"]):
+        return "แอร์สุ"
+
+    # 3. ตรวจจับ Sukhumvit ตามด้วยเลขซอย ให้กลายเป็น สุขุมวิท
+    if re.search(r'\bSukhumvit\s*\d+\b', cleaned, flags=re.IGNORECASE):
+        return "สุขุมวิท"
+
+    matched_th_road = ""
+
+    # 4. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT
+    for eng_road, th_road in current_main_roads.items():
+        if eng_road.lower() in cleaned.lower() or th_road in cleaned:
+            matched_th_road = th_road.strip()
+            break
+
+    # 5. หากไม่เจอ ลองเช็คใน MAJOR_AREAS_DICT
+    if not matched_th_road:
+        for area_eng, area_th in current_major_areas.items():
+            if area_eng.lower() in cleaned.lower() or area_th in cleaned:
+                matched_th_road = area_th.strip()
+                break
+
+    if matched_th_road:
+        return matched_th_road
+
+    # หากไม่ตรง ให้ตัดคำว่า "ซอย [ตัวเลข]" ออก
+    cleaned_no_soi = re.sub(r'(?:ซอย|soi)\s*\d+', '', cleaned, flags=re.IGNORECASE).strip()
+    
+    return cleaned_no_soi if cleaned_no_soi else cleaned
+
+def parse_job_line(line_text):
+    parts = line_text.split('-')
+    if len(parts) >= 2:
+        pickup_raw = parts[0].strip()
+        dropoff_raw = parts[1].strip()
+        
+        pickup_clean = parse_location_rule_based(pickup_raw)
+        dropoff_clean = parse_location_rule_based(dropoff_raw)
+        
+        return pickup_clean, dropoff_clean
+    return line_text, "-"
 
 def parse_job_text(raw_text, fallback_id="F01"):
     if not raw_text:
@@ -269,7 +284,6 @@ def parse_job_text(raw_text, fallback_id="F01"):
 
     lines = [line.strip() for line in raw_text.strip().split('\n') if line.strip()]
     
-    # ค้นหารหัสใบงานที่ขึ้นต้นด้วย F ตามด้วยตัวเลข (เช่น F01, F02) เป็นอันดับแรกสุด
     id_match = re.search(r'\b(F\d+)\b', raw_text, re.IGNORECASE)
     if not id_match:
         id_match = re.search(r'(?:รหัสใบงาน|Job ID|ID)[:\s]*([A-Za-z0-9_-]+)', raw_text, re.IGNORECASE)
@@ -529,6 +543,8 @@ def api_status():
         "latest_jobs": latest_jobs,
         "custom_keywords": settings.get("custom_keywords", []),
         "line_groups": settings.get("line_groups", []),
+        "main_roads_dict": settings.get("main_roads_dict", DEFAULT_MAIN_ROADS_DICT),
+        "major_areas_dict": settings.get("major_areas_dict", DEFAULT_MAJOR_AREAS_DICT),
         "settings": settings
     })
 
