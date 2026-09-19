@@ -174,15 +174,19 @@ def parse_location_rule_based(raw_location):
     elif any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ"]):
         return "แอร์สุ"
 
+    # 3. ตรวจจับ Sukhumvit ตามด้วยเลขซอย (เช่น Sukhumvit 15, Sukhumvit 20) ให้กลายเป็น สุขุมวิท
+    if re.search(r'\bSukhumvit\s*\d+\b', cleaned, flags=re.IGNORECASE):
+        return "สุขุมวิท"
+
     matched_th_road = ""
 
-    # 3. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT (ทั้งอังกฤษและไทย)
+    # 4. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT (ทั้งอังกฤษและไทย)
     for eng_road, th_road in MAIN_ROADS_DICT.items():
         if eng_road.lower() in cleaned.lower() or th_road in cleaned:
             matched_th_road = th_road.strip()
             break
 
-    # 4. หากไม่เจอในถนนหลัก ลองเช็คใน MAJOR_AREAS_DICT
+    # 5. หากไม่เจอในถนนหลัก ลองเช็คใน MAJOR_AREAS_DICT
     if not matched_th_road:
         for area_eng, area_th in MAJOR_AREAS_DICT.items():
             if area_eng.lower() in cleaned.lower() or area_th in cleaned:
