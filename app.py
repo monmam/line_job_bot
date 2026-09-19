@@ -17,7 +17,7 @@ from linebot.v3.messaging import (
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
 # Import local modules
-from ai import summarize_jobs_with_ai
+from ai import summarize_jobs_with_ai, smart_parse_location_with_gemini
 from google_sheet import save_to_google_sheets, get_sheet_client, delete_row_from_google_sheets
 
 load_dotenv()
@@ -105,106 +105,8 @@ def save_settings(data):
     with open("settings.json", "w", encoding="utf-8") as f:
         json.dump(current, f, ensure_ascii=False, indent=2)
 
-def map_dropoff_location(raw_dropoff):
-    """แปลงจุดส่งให้ชาญฉลาดขึ้น ค้นหาถนนและย่านสำคัญจากทั้งข้อความ"""
-    if not raw_dropoff or raw_dropoff == "-":
-        return "-"
-    
-    text = raw_dropoff.strip()
-    lower_text = text.lower()
-    lower_text = re.sub(r'\s+', ' ', lower_text)
-
-    # 0. ตรวจสอบ Custom Keywords จาก Settings
-    settings = load_settings()
-    custom_keywords = settings.get("custom_keywords", [])
-    for item in custom_keywords:
-        kw = item.get("keyword", "").strip().lower()
-        zone = item.get("zone", "").strip()
-        if kw and kw in lower_text:
-            return zone
-
-    # ตรวจสอบ Custom Locations แบบเดิม
-    custom_locs = settings.get("custom_locations", {})
-    for keyword, mapped_name in custom_locs.items():
-        if keyword.lower() in lower_text:
-            return mapped_name
-
-    # 1. ตรวจจับถนนหลักหรือ New Petchaburi เป็นอันดับแรก
-    if any(k in lower_text for k in ["new phetchaburi", "new petchaburi", "เพชรบุรีตัดใหม่"]):
-        return "เพชรบุรีตัดใหม่"
-
-    # 2. ตรวจจับ “ซอยที่มีเลข”
-    soi_patterns = [
-        { "regex": r'(?:sukhumvit|สุขุมวิท).*(?:soi|ซอย)\s*(\d+)', "template": "สุขุมวิท $1" },
-        { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:sukhumvit|สุขุมวิท)', "template": "สุขุมวิท $1" },
-        { "regex": r'(?:sukhumvit|สุขุมวิท)\s*[-]?\s*(\d+)', "template": "สุขุมวิท $1" },
-        { "regex": r'(?:phahonyothin|พหลโยธิน).*(?:soi|ซอย)\s*(\d+)', "template": "พหลโยธิน $1" },
-        { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:phahonyothin|พหลโยธิน)', "template": "พหลโยธิน $1" },
-        { "regex": r'(?:phetchaburi|เพชรบุรี).*(?:soi|ซอย)\s*(\d+)', "template": "เพชรบุรี $1" },
-        { "regex": r'(?:soi|ซอย)\s*(\d+).*(?:phetchaburi|เพชรบุรี)', "template": "เพชรบุรี $1" }
-    ]
-
-    for p in soi_patterns:
-        match = re.search(p["regex"], lower_text)
-        if match:
-            return p["template"].replace("$1", match.group(1))
-
-    # 3. ตรวจจับ “ย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่”
-    districts = [
-        { "keywords": ["pratunam", "ประตูน้ำ"], "result": "ประตูน้ำ" },
-        { "keywords": ["khao san", "khaosan", "ข้าวสาร"], "result": "ข้าวสาร" },
-        { "keywords": ["yaowarat", "chinatown", "เยาวราช"], "result": "เยาวราช" },
-        { "keywords": ["thonglor", "thong lor", "ทองหล่อ"], "result": "ทองหล่อ" },
-        { "keywords": ["ekkamai", "เอกมัย"], "result": "เอกมัย" },
-        { "keywords": ["ploenchit", "ploen chit", "เพลินจิต"], "result": "เพลินจิต" },
-        { "keywords": ["asok", "อโศก"], "result": "อโศก" },
-        { "keywords": ["prompong", "phrom phong", "พร้อมพงษ์"], "result": "พร้อมพงษ์" },
-        { "keywords": ["ari", "aree", "อารีย์"], "result": "อารีย์" },
-        { "keywords": ["victory monument", "อนุสาวรีย์"], "result": "อนุสาวรีย์" },
-        { "keywords": ["rangsit", "klong 1", "คลอง 1", "รังสิต"], "result": "รังสิต" },
-        { "keywords": ["ratchathewi", "ratchatevee", "ราชเทวี"], "result": "ราชเทวี" },
-        { "keywords": ["pathum wan", "pathumwan", "ปทุมวัน"], "result": "ปทุมวัน" },
-        { "keywords": ["huai khwang", "ห้วยขวาง"], "result": "ห้วยขวาง" },
-        { "keywords": ["ratchada", "รัชดา"], "result": "รัชดา" },
-        { "keywords": ["ratchayothin", "รัชโยธิน"], "result": "รัชโยธิน" },
-        { "keywords": ["bang na", "bangna", "บางนา"], "result": "บางนา" },
-        { "keywords": ["srinakarin", "srinagarind", "ศรีนครินทร์"], "result": "ศรีนครินทร์" },
-        { "keywords": ["riverside", "charoenkrung", "เจริญกรุง"], "result": "เจริญกรุง" },
-        { "keywords": ["siam"], "result": "สยาม" },
-        { "keywords": ["kasem san", "เกษมสันต์"], "result": "เกษมสันต์" },
-        { "keywords": ["chatuchak", "จตุจักร"], "result": "จตุจักร" },
-        { "keywords": ["c u inn", "cu inn"], "result": "จตุจักร" }
-    ]
-
-    for d in districts:
-        for kw in d["keywords"]:
-            if kw in lower_text:
-                return d["result"]
-
-    # 4. ตรวจจับ “ถนนสายหลัก”
-    main_roads = [
-        { "keywords": ["witthayu", "wireless", "วิทยุ"], "result": "วิทยุ" },
-        { "keywords": ["sathon", "sathorn", "สาทร"], "result": "สาทร" },
-        { "keywords": ["silom", "สีลม"], "result": "สีลม" },
-        { "keywords": ["rama 9", "rama ix", "พระราม 9"], "result": "พระราม 9" },
-        { "keywords": ["rama 4", "rama iv", "พระราม 4"], "result": "พระราม 4" },
-        { "keywords": ["ladprao", "lat phrao", "ลาดพร้าว"], "result": "ลาดพร้าว" },
-        { "keywords": ["sukhumvit", "สุขุมวิท"], "result": "สุขุมวิท" },
-        { "keywords": ["phetchaburi", "เพชรบุรี"], "result": "เพชรบุรี" },
-        { "keywords": ["phahonyothin", "พหลโยธิน"], "result": "พหลโยธิน" },
-        { "keywords": ["กำแพงเพชร", "kamphaeng phet"], "result": "จตุจักร" }
-    ]
-
-    for r in main_roads:
-        for kw in r["keywords"]:
-            if kw in lower_text:
-                return r["result"]
-
-    clean_text = text.split(',')[0].split('(')[0].strip()
-    return clean_text if len(clean_text) < 15 else "จตุจักร"
-
 def parse_job_text(raw_text, fallback_id="F01"):
-    """แกะข้อมูลใบงาน รองรับจุดรับ จุดส่ง และแปลงค่าอัตโนมัติ"""
+    """แกะข้อมูลใบงาน รองรับจุดรับ จุดส่ง และแปลงค่าอัตโนมัติด้วย Gemini AI"""
     if not raw_text:
         return {}
 
@@ -255,7 +157,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
     else:
         pickup_mapped = PICKUP_MAP.get(pickup_upper, pickup_raw)
 
-    # 6. จุดส่ง (Dropoff)
+    # 6. จุดส่ง (Dropoff) - ใช้ Gemini AI ช่วยวิเคราะห์ตามกฎย่านและภาษา
     dropoff_raw = "-"
     dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if dropoff_raw_match:
@@ -269,7 +171,8 @@ def parse_job_text(raw_text, fallback_id="F01"):
                 dropoff_raw = line
                 break
 
-    dropoff_mapped = map_dropoff_location(dropoff_raw)
+    # เรียกใช้ Gemini AI สำหรับแปลงจุดส่ง
+    dropoff_mapped = smart_parse_location_with_gemini(dropoff_raw)
 
     # 7. ขนาดรถและราคา (Car & Price)
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
