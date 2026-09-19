@@ -352,21 +352,19 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if flight_match:
         flight_val = flight_match.group(1).strip()
 
-    # ดึงค่าจากแท็ก 【接รับ】 และ 【ส่ง】 โดยรองรับหลากหลายรูปแบบ
+    # ดึงค่าจากแท็ก 【接รับ】 และ 【ส่ง】
     pickup_raw = "-"
     dropoff_raw = "-"
 
-    pickup_tag = re.search(r'【(?:接รับ|接|รับ)?[】\s]*(.+)', raw_text)
+    # ค้นหาบรรทัดหรือข้อความหลังแท็กรับ
+    pickup_tag = re.search(r'【(?:接รับ|接|รับ)?[】]?\s*([^\n]+)', raw_text)
     if pickup_tag:
-        # หากจับได้ทั้งบรรทัด ให้กรองเอาเฉพาะข้อความหลังแท็ก
-        p_text = pickup_tag.group(1).strip()
-        # ถ้ามีแท็กซ้อนกัน ให้ตัดออก
-        pickup_raw = re.sub(r'^[【].*?[】]\s*', '', p_text)
+        pickup_raw = pickup_tag.group(1).strip()
 
-    dropoff_tag = re.search(r'【(?:送ส่ง|送|ส่ง)?[】\s]*(.+)', raw_text)
+    # ค้นหาบรรทัดหรือข้อความหลังแท็กส่ง (รองรับทั้งภาษาจีนและไทย)
+    dropoff_tag = re.search(r'【(?:送ส่ง|送|ส่ง)?[】]?\s*([^\n]+)', raw_text)
     if dropoff_tag:
-        d_text = dropoff_tag.group(1).strip()
-        dropoff_raw = re.sub(r'^[【].*?[】]\s*', '', d_text)
+        dropoff_raw = dropoff_tag.group(1).strip()
 
     # แปลงชื่อสถานที่
     pickup_mapped = parse_location_rule_based(pickup_raw)
