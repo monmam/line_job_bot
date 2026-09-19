@@ -230,6 +230,14 @@ def parse_location_rule_based(raw_location):
     settings = load_settings()
     current_main_roads = settings.get("main_roads_dict", DEFAULT_MAIN_ROADS_DICT)
     current_major_areas = settings.get("major_areas_dict", DEFAULT_MAJOR_AREAS_DICT)
+    custom_keywords = settings.get("custom_keywords", [])
+
+    # 0. ตรวจสอบ Custom Keywords ที่ผู้ใช้ตั้งค่าเพิ่มเอง
+    for item in custom_keywords:
+        kw = item.get("keyword", "").strip()
+        target = item.get("zone", "").strip()
+        if kw and kw.lower() in cleaned.lower():
+            return target if target else cleaned
 
     # 1. ตรวจจับสนามบินดอนเมือง
     if any(k in upper_loc for k in ["DMK", "DON MUEANG", "แอร์ดอน"]) or re.search(r'DMK\s*T[1-5]', upper_loc):
@@ -245,18 +253,34 @@ def parse_location_rule_based(raw_location):
 
     matched_th_road = ""
 
-    # 4. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT
-    for eng_road, th_road in current_main_roads.items():
-        if eng_road.lower() in cleaned.lower() or th_road in cleaned:
-            matched_th_road = th_road.strip()
-            break
+    # 4. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT (รองรับทั้งแบบที่เป็น dict และ list แบบ UI ส่งมา)
+    if isinstance(current_main_roads, dict):
+        for eng_road, th_road in current_main_roads.items():
+            if eng_road.lower() in cleaned.lower() or th_road in cleaned:
+                matched_th_road = th_road.strip()
+                break
+    elif isinstance(current_main_roads, list):
+        for item in current_main_roads:
+            key = item.get("key", "")
+            aliases = item.get("aliases", [])
+            if key.lower() in cleaned.lower() or any(alias.lower() in cleaned.lower() for alias in aliases):
+                matched_th_road = key.strip()
+                break
 
     # 5. หากไม่เจอ ลองเช็คใน MAJOR_AREAS_DICT
     if not matched_th_road:
-        for area_eng, area_th in current_major_areas.items():
-            if area_eng.lower() in cleaned.lower() or area_th in cleaned:
-                matched_th_road = area_th.strip()
-                break
+        if isinstance(current_major_areas, dict):
+            for area_eng, area_th in current_major_areas.items():
+                if area_eng.lower() in cleaned.lower() or area_th in cleaned:
+                    matched_th_road = area_th.strip()
+                    break
+        elif isinstance(current_major_areas, list):
+            for item in current_major_areas:
+                key = item.get("key", "")
+                aliases = item.get("aliases", [])
+                if key.lower() in cleaned.lower() or any(alias.lower() in cleaned.lower() for alias in aliases):
+                    matched_th_road = key.strip()
+                    break
 
     if matched_th_road:
         return matched_th_road
