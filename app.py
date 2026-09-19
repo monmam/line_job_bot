@@ -449,31 +449,7 @@ def handle_message(event):
     if not is_valid_form:
         return  # ถ้าไม่ใช่ใบงาน บอทจะเงียบและไม่ตอบอะไรกลับมา
         
-    settings = load_settings()
-    connected_groups = settings.get("line_groups", []) 
-
-    # แปลงข้อความดิบให้เป็นรูปแบบสรุปย่อ (formatted_summary)
-    fallback_id = f"F{len(latest_jobs) + 1:02d}"
-    parsed_info = parse_job_text(received_text, fallback_id=fallback_id)
-    summary_msg = parsed_info["formatted_summary"]
-
-    with ApiClient(configuration) as api_client:
-        line_bot_api = MessagingApi(api_client)
-        
-        # ส่ง "ข้อความสรุปย่อ" ไปยังกลุ่มที่เชื่อมต่อไว้ในหน้า Settings โดยอัตโนมัติ
-        for group in connected_groups:
-            g_id = group.get("group_id") 
-            if g_id:
-                try:
-                    line_bot_api.push_message(
-                        PushMessageRequest(
-                            to=g_id,
-                            messages=[TextMessage(text=summary_msg)]
-                        )
-                    )
-                except Exception as e:
-                    print(f"Push to group {g_id} error: {e}")
-
+    # นำเข้าคิวรอประมวลผลแบบ Batch (จะส่งออกไปเมื่อครบกำหนดเวลา Timer เท่านั้น)
     add_job_to_queue(received_text, sender_id=user_id)
     
 @app.route("/")
