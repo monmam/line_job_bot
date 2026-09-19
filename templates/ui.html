@@ -476,29 +476,11 @@
        <p id="line-groups-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีการเชื่อมต่อกลุ่ม LINE</p>
       </article>
 
-      <!-- ตั้งค่ากำหนดโซนเอง (Custom Keywords Mapping) -->
+      <!-- ตั้งค่าถนนหลัก -->
       <article class="page-card mt-5 p-4 md:p-6">
        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
-         <h2 class="m-0 text-sm font-bold text-[#0F172A]">ตั้งค่ากำหนดโซนเอง (Custom Keywords)</h2>
-         <p class="mt-1 text-xs text-[#64748B]">เพิ่มคำสั่งจับคู่คำเฉพาะ เพื่อแปลงเป็นโซนตามต้องการ</p>
-        </div>
-        <button id="add-keyword-row" type="button" class="rounded-lg bg-[#EFF6FF] text-[#2563EB] px-3 py-1.5 text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1 w-fit">
-         <i data-lucide="plus" class="h-3.5 w-3.5"></i> เพิ่มเงื่อนไข
-        </button>
-       </div>
-
-       <div id="keywords-container" class="space-y-3 mt-4">
-        <!-- แถวรายการเงื่อนไขจะถูกเพิ่มที่นี่ผ่าน JavaScript -->
-       </div>
-       <p id="keywords-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีเงื่อนไข Custom Keywords</p>
-      </article>
-
-      <!-- ตั้งค่าพจนานุกรมถนนหลัก (MAIN_ROADS_DICT) -->
-      <article class="page-card mt-5 p-4 md:p-6">
-       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
-        <div>
-         <h2 class="m-0 text-sm font-bold text-[#0F172A]">พจนานุกรมถนนหลัก (MAIN_ROADS_DICT)</h2>
+         <h2 class="m-0 text-sm font-bold text-[#0F172A]">ถนนหลัก</h2>
          <p class="mt-1 text-xs text-[#64748B]">กำหนดรายการคำพ้องหรือชื่อถนนหลักที่ใช้จับคู่ในระบบ</p>
         </div>
         <button id="add-road-row" type="button" class="rounded-lg bg-[#EFF6FF] text-[#2563EB] px-3 py-1.5 text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1 w-fit">
@@ -509,14 +491,14 @@
        <div id="roads-container" class="space-y-3 mt-4">
         <!-- แถวรายการพจนานุกรมถนนจะถูกเพิ่มที่นี่ผ่าน JavaScript -->
        </div>
-       <p id="roads-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีข้อมูลพจนานุกรมถนนหลัก</p>
+       <p id="roads-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีข้อมูลถนนหลัก</p>
       </article>
 
-      <!-- ตั้งค่าพจนานุกรมย่านสำคัญ (MAJOR_AREAS_DICT) -->
+      <!-- ตั้งค่าย่านสำคัญ -->
       <article class="page-card mt-5 p-4 md:p-6">
        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
-         <h2 class="m-0 text-sm font-bold text-[#0F172A]">พจนานุกรมย่านสำคัญ (MAJOR_AREAS_DICT)</h2>
+         <h2 class="m-0 text-sm font-bold text-[#0F172A]">ย่านสำคัญ</h2>
          <p class="mt-1 text-xs text-[#64748B]">กำหนดชื่อย่านสำคัญและคำที่เกี่ยวข้องในการจำแนกพื้นที่</p>
         </div>
         <button id="add-area-row" type="button" class="rounded-lg bg-[#EFF6FF] text-[#2563EB] px-3 py-1.5 text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1 w-fit">
@@ -527,7 +509,7 @@
        <div id="areas-container" class="space-y-3 mt-4">
         <!-- แถวรายการพจนานุกรมย่านจะถูกเพิ่มที่นี่ผ่าน JavaScript -->
        </div>
-       <p id="areas-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีข้อมูลพจนานุกรมย่านสำคัญ</p>
+       <p id="areas-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีข้อมูลย่านสำคัญ</p>
       </article>
 
       <button id="save-settings" type="button" class="mt-5 rounded-lg bg-[#2563EB] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 w-full sm:w-auto">บันทึกการตั้งค่า</button>
@@ -561,8 +543,8 @@
   <div id="custom-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm hidden p-4">
     <div class="page-card w-full max-w-sm p-5 md:p-6 bg-white shadow-xl rounded-2xl">
       <div class="flex items-center gap-3 mb-3">
-        <div class="p-2.5 bg-red-50 text-red-600 rounded-xl">
-          <i data-lucide="alert-triangle" class="h-5 w-5"></i>
+        <div id="modal-icon-container" class="p-2.5 bg-red-50 text-red-600 rounded-xl">
+          <i data-lucide="alert-triangle" class="h-5 w-5" id="modal-icon"></i>
         </div>
         <div>
           <h3 class="m-0 text-sm font-bold text-[#0F172A]" id="modal-title">ยืนยันการลบ</h3>
@@ -571,7 +553,7 @@
       </div>
       <div class="mt-6 flex justify-end gap-2">
         <button id="modal-cancel" type="button" class="rounded-lg border border-[#E2E8F0] px-4 py-2 text-xs font-medium text-[#64748B] hover:bg-[#F8FAFC]">ยกเลิก</button>
-        <button id="modal-confirm" type="button" class="rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700">ลบข้อมูล</button>
+        <button id="modal-confirm" type="button" class="rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700">ยืนยัน</button>
       </div>
     </div>
   </div>
@@ -593,7 +575,7 @@
       test: "ทดสอบใบงาน\nวางข้อความใบงานเพื่อทดสอบการเพิ่มเข้าคิว" 
     };
     let toastTimer;
-    let deleteTargetId = null;
+    let modalActionCallback = null;
     let serverMaxWaitSeconds = 120;
 
     function getJobVal(job, ...keys) {
@@ -612,6 +594,25 @@
       toast.classList.add("show");
       clearTimeout(toastTimer);
       toastTimer = setTimeout(() => toast.classList.remove("show"), 2600);
+    }
+
+    function showModal({ title, desc, confirmText, confirmClass, iconName, iconClass, onConfirm }) {
+      document.getElementById("modal-title").textContent = title;
+      document.getElementById("modal-desc").textContent = desc;
+      
+      const confirmBtn = document.getElementById("modal-confirm");
+      confirmBtn.textContent = confirmText || "ยืนยัน";
+      confirmBtn.className = `rounded-lg px-4 py-2 text-xs font-semibold text-white ${confirmClass || 'bg-red-600 hover:bg-red-700'}`;
+
+      const iconContainer = document.getElementById("modal-icon-container");
+      iconContainer.className = `p-2.5 rounded-xl ${iconClass || 'bg-red-50 text-red-600'}`;
+      
+      const icon = document.getElementById("modal-icon");
+      icon.setAttribute("data-lucide", iconName || "alert-triangle");
+      lucide.createIcons();
+
+      modalActionCallback = onConfirm;
+      document.getElementById("custom-modal").classList.remove("hidden");
     }
 
     function showView(view) {
@@ -778,9 +779,6 @@
         if (!res.ok) return;
         const data = await res.json();
         
-        if (data.custom_keywords && Array.isArray(data.custom_keywords)) {
-          renderKeywordsInputs(data.custom_keywords);
-        }
         if (data.line_groups && Array.isArray(data.line_groups)) {
           renderLineGroupsInputs(data.line_groups);
         }
@@ -795,39 +793,6 @@
       }
     }
 
-    function renderKeywordsInputs(keywords) {
-      const container = document.getElementById('keywords-container');
-      const emptyText = document.getElementById('keywords-empty');
-      if (!container) return;
-
-      if (!keywords || keywords.length === 0) {
-        container.innerHTML = '';
-        emptyText.classList.remove('hidden');
-        return;
-      }
-      emptyText.classList.add('hidden');
-      container.innerHTML = keywords.map((item, idx) => `
-        <div class="flex items-center gap-2 keyword-row">
-          <input type="text" placeholder="คำเฉพาะ (เช่น สุวรรณภูมิ)" value="${item.keyword || ''}" class="keyword-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-          <input type="text" placeholder="โซนเป้าหมาย (เช่น BKK)" value="${item.zone || ''}" class="zone-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-          <button type="button" onclick="this.closest('.keyword-row').remove(); toggleKeywordsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
-            <i data-lucide="trash-2" class="h-4 w-4"></i>
-          </button>
-        </div>
-      `).join('');
-      lucide.createIcons();
-    }
-
-    function toggleKeywordsEmpty() {
-      const container = document.getElementById('keywords-container');
-      const emptyText = document.getElementById('keywords-empty');
-      if (container.children.length === 0) {
-        emptyText.classList.remove('hidden');
-      } else {
-        emptyText.classList.add('hidden');
-      }
-    }
-
     function renderLineGroupsInputs(groups) {
       const container = document.getElementById('line-groups-container');
       const emptyText = document.getElementById('line-groups-empty');
@@ -839,11 +804,11 @@
         return;
       }
       emptyText.classList.add('hidden');
-      container.innerHTML = groups.map((item, idx) => `
+      container.innerHTML = groups.map((item) => `
         <div class="flex items-center gap-2 line-group-row">
           <input type="text" placeholder="ชื่อกลุ่ม (เช่น กลุ่มรถ โซน A)" value="${item.name || ''}" class="group-name-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
           <input type="text" placeholder="LINE Group ID (Cxxxxxxxx...)" value="${item.group_id || ''}" class="group-id-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs font-mono outline-none focus:border-[#2563EB]">
-          <button type="button" onclick="this.closest('.line-group-row').remove(); toggleGroupsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+          <button type="button" onclick="confirmDeleteRow(this, '.line-group-row', toggleGroupsEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
             <i data-lucide="trash-2" class="h-4 w-4"></i>
           </button>
         </div>
@@ -882,8 +847,8 @@
       container.innerHTML = entries.map((item) => `
         <div class="flex items-center gap-2 road-row">
           <input type="text" placeholder="ชื่อถนนหลัก (Key)" value="${item.key || item.road || ''}" class="road-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-          <input type="text" placeholder="คำพ้อง/รายการย่อย (คั่นด้วยจุลภาค เช่น ถนนสุขุมวิท, สุขุมวิท)" value="${item.value || (Array.isArray(item.aliases) ? item.aliases.join(', ') : '') || ''}" class="road-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-          <button type="button" onclick="this.closest('.road-row').remove(); toggleRoadsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+          <input type="text" placeholder="คำพ้อง/รายการย่อย (คั่นด้วยจุลภาค)" value="${item.value || (Array.isArray(item.aliases) ? item.aliases.join(', ') : '') || ''}" class="road-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+          <button type="button" onclick="confirmDeleteRow(this, '.road-row', toggleRoadsEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
             <i data-lucide="trash-2" class="h-4 w-4"></i>
           </button>
         </div>
@@ -922,8 +887,8 @@
       container.innerHTML = entries.map((item) => `
         <div class="flex items-center gap-2 area-row">
           <input type="text" placeholder="ชื่อย่านสำคัญ (Key)" value="${item.key || item.area || ''}" class="area-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-          <input type="text" placeholder="คำที่เกี่ยวข้อง (คั่นด้วยจุลภาค เช่น สีลม, สาทร, ช่องนนทรี)" value="${item.value || (Array.isArray(item.keywords) ? item.keywords.join(', ') : '') || ''}" class="area-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-          <button type="button" onclick="this.closest('.area-row').remove(); toggleAreasEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+          <input type="text" placeholder="คำที่เกี่ยวข้อง (คั่นด้วยจุลภาค)" value="${item.value || (Array.isArray(item.keywords) ? item.keywords.join(', ') : '') || ''}" class="area-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+          <button type="button" onclick="confirmDeleteRow(this, '.area-row', toggleAreasEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
             <i data-lucide="trash-2" class="h-4 w-4"></i>
           </button>
         </div>
@@ -941,26 +906,23 @@
       }
     }
 
-    document.addEventListener("DOMContentLoaded", () => {
-      const addKeywordBtn = document.getElementById('add-keyword-row');
-      if (addKeywordBtn) {
-        addKeywordBtn.addEventListener('click', () => {
-          const container = document.getElementById('keywords-container');
-          document.getElementById('keywords-empty').classList.add('hidden');
-          const div = document.createElement('div');
-          div.className = "flex items-center gap-2 keyword-row";
-          div.innerHTML = `
-            <input type="text" placeholder="คำเฉพาะ (เช่น สุวรรณภูมิ)" class="keyword-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-            <input type="text" placeholder="โซนเป้าหมาย (เช่น BKK)" class="zone-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-            <button type="button" onclick="this.closest('.keyword-row').remove(); toggleKeywordsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
-              <i data-lucide="trash-2" class="h-4 w-4"></i>
-            </button>
-          `;
-          container.appendChild(div);
-          lucide.createIcons();
-        });
-      }
+    function confirmDeleteRow(btn, rowSelector, checkEmptyFunc) {
+      showModal({
+        title: "ยืนยันการลบรายการ",
+        desc: "คุณต้องการลบรายการนี้ออกจากระบบใช่หรือไม่?",
+        confirmText: "ลบรายการ",
+        confirmClass: "bg-red-600 hover:bg-red-700",
+        iconName: "trash-2",
+        iconClass: "bg-red-50 text-red-600",
+        onConfirm: () => {
+          btn.closest(rowSelector).remove();
+          if (checkEmptyFunc) checkEmptyFunc();
+          showToast("ลบรายการเรียบร้อยแล้ว");
+        }
+      });
+    }
 
+    document.addEventListener("DOMContentLoaded", () => {
       const addGroupBtn = document.getElementById('add-group-row');
       if (addGroupBtn) {
         addGroupBtn.addEventListener('click', () => {
@@ -971,7 +933,7 @@
           div.innerHTML = `
             <input type="text" placeholder="ชื่อกลุ่ม (เช่น กลุ่มรถ โซน A)" class="group-name-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
             <input type="text" placeholder="LINE Group ID (Cxxxxxxxx...)" class="group-id-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs font-mono outline-none focus:border-[#2563EB]">
-            <button type="button" onclick="this.closest('.line-group-row').remove(); toggleGroupsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+            <button type="button" onclick="confirmDeleteRow(this, '.line-group-row', toggleGroupsEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
               <i data-lucide="trash-2" class="h-4 w-4"></i>
             </button>
           `;
@@ -990,7 +952,7 @@
           div.innerHTML = `
             <input type="text" placeholder="ชื่อถนนหลัก (Key)" class="road-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
             <input type="text" placeholder="คำพ้อง/รายการย่อย (คั่นด้วยจุลภาค)" class="road-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-            <button type="button" onclick="this.closest('.road-row').remove(); toggleRoadsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+            <button type="button" onclick="confirmDeleteRow(this, '.road-row', toggleRoadsEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
               <i data-lucide="trash-2" class="h-4 w-4"></i>
             </button>
           `;
@@ -1009,7 +971,7 @@
           div.innerHTML = `
             <input type="text" placeholder="ชื่อย่านสำคัญ (Key)" class="area-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
             <input type="text" placeholder="คำที่เกี่ยวข้อง (คั่นด้วยจุลภาค)" class="area-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-            <button type="button" onclick="this.closest('.area-row').remove(); toggleAreasEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+            <button type="button" onclick="confirmDeleteRow(this, '.area-row', toggleAreasEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
               <i data-lucide="trash-2" class="h-4 w-4"></i>
             </button>
           `;
@@ -1024,34 +986,15 @@
 
       document.getElementById("modal-cancel").addEventListener("click", () => {
         document.getElementById("custom-modal").classList.add("hidden");
-        deleteTargetId = null;
+        modalActionCallback = null;
       });
 
       document.getElementById("modal-confirm").addEventListener("click", async () => {
-        if (deleteTargetId) {
-          try {
-            const res = await fetch('/api/delete_job', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: deleteTargetId })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-              delete localJobs[deleteTargetId];
-              showToast(`ลบใบงาน ${deleteTargetId} สำเร็จ`);
-              fetchGoogleSheetsData();
-            } else {
-              showToast(data.message || "ลบข้อมูลไม่สำเร็จ");
-            }
-          } catch (err) {
-            console.error(err);
-            showToast("เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์");
-          }
-          
-          document.getElementById("custom-modal").classList.add("hidden");
-          deleteTargetId = null;
+        if (modalActionCallback) {
+          await modalActionCallback();
         }
+        document.getElementById("custom-modal").classList.add("hidden");
+        modalActionCallback = null;
       });
 
       document.getElementById("job-search").addEventListener("input", () => {
@@ -1124,67 +1067,66 @@
         }
       });
 
-      document.getElementById("save-settings").addEventListener("click", async () => {
-        const waitingTimeVal = document.getElementById("waiting-time").value;
-        
-        const keywordRows = document.querySelectorAll(".keyword-row");
-        const customKeywords = [];
-        keywordRows.forEach(row => {
-          const kw = row.querySelector(".keyword-input").value.trim();
-          const zn = row.querySelector(".zone-input").value.trim();
-          if (kw && zn) {
-            customKeywords.push({ keyword: kw, zone: zn });
+      document.getElementById("save-settings").addEventListener("click", () => {
+        showModal({
+          title: "ยืนยันการบันทึกการตั้งค่า",
+          desc: "คุณต้องการบันทึกการเปลี่ยนแปลงทั้งหมดใช่หรือไม่?",
+          confirmText: "บันทึกข้อมูล",
+          confirmClass: "bg-blue-600 hover:bg-blue-700",
+          iconName: "save",
+          iconClass: "bg-blue-50 text-blue-600",
+          onConfirm: async () => {
+            const waitingTimeVal = document.getElementById("waiting-time").value;
+            
+            const groupRows = document.querySelectorAll(".line-group-row");
+            const lineGroups = [];
+            groupRows.forEach(row => {
+              const name = row.querySelector(".group-name-input").value.trim();
+              const groupId = row.querySelector(".group-id-input").value.trim();
+              if (name && groupId) {
+                lineGroups.push({ name: name, group_id: groupId });
+              }
+            });
+
+            const roadRows = document.querySelectorAll(".road-row");
+            const mainRoadsDict = {};
+            roadRows.forEach(row => {
+              const key = row.querySelector(".road-key-input").value.trim();
+              const valStr = row.querySelector(".road-val-input").value.trim();
+              if (key) {
+                mainRoadsDict[key] = valStr.split(',').map(s => s.trim()).filter(Boolean);
+              }
+            });
+
+            const areaRows = document.querySelectorAll(".area-row");
+            const majorAreasDict = {};
+            areaRows.forEach(row => {
+              const key = row.querySelector(".area-key-input").value.trim();
+              const valStr = row.querySelector(".area-val-input").value.trim();
+              if (key) {
+                majorAreasDict[key] = valStr.split(',').map(s => s.trim()).filter(Boolean);
+              }
+            });
+
+            try {
+              const res = await fetch('/api/save_settings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ 
+                  waiting_time: waitingTimeVal,
+                  line_groups: lineGroups,
+                  main_roads_dict: mainRoadsDict,
+                  major_areas_dict: majorAreasDict
+                })
+              });
+              const data = await res.json();
+              showToast(data.message || "บันทึกการตั้งค่าเรียบร้อยแล้ว");
+              fetchDashboardData();
+            } catch (e) {
+              showToast("บันทึกการตั้งค่าเรียบร้อยแล้ว");
+            }
           }
         });
-
-        const groupRows = document.querySelectorAll(".line-group-row");
-        const lineGroups = [];
-        groupRows.forEach(row => {
-          const name = row.querySelector(".group-name-input").value.trim();
-          const groupId = row.querySelector(".group-id-input").value.trim();
-          if (name && groupId) {
-            lineGroups.push({ name: name, group_id: groupId });
-          }
-        });
-
-        const roadRows = document.querySelectorAll(".road-row");
-        const mainRoadsDict = {};
-        roadRows.forEach(row => {
-          const key = row.querySelector(".road-key-input").value.trim();
-          const valStr = row.querySelector(".road-val-input").value.trim();
-          if (key) {
-            mainRoadsDict[key] = valStr.split(',').map(s => s.trim()).filter(Boolean);
-          }
-        });
-
-        const areaRows = document.querySelectorAll(".area-row");
-        const majorAreasDict = {};
-        areaRows.forEach(row => {
-          const key = row.querySelector(".area-key-input").value.trim();
-          const valStr = row.querySelector(".area-val-input").value.trim();
-          if (key) {
-            majorAreasDict[key] = valStr.split(',').map(s => s.trim()).filter(Boolean);
-          }
-        });
-
-        try {
-          const res = await fetch('/api/save_settings', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ 
-              waiting_time: waitingTimeVal,
-              custom_keywords: customKeywords,
-              line_groups: lineGroups,
-              main_roads_dict: mainRoadsDict,
-              major_areas_dict: majorAreasDict
-            })
-          });
-          const data = await res.json();
-          showToast(data.message || "บันทึกการตั้งค่าเรียบร้อยแล้ว");
-          fetchDashboardData();
-        } catch (e) {
-          showToast("บันทึกการตั้งค่าเรียบร้อยแล้ว");
-        }
       });
 
       setInterval(fetchDashboardData, 1000);
@@ -1269,10 +1211,35 @@
     }
 
     function deleteJobRow(jobId) {
-      deleteTargetId = jobId;
-      document.getElementById("modal-desc").textContent = `คุณต้องการลบใบงานรหัส ${jobId} ใช่หรือไม่?`;
-      document.getElementById("custom-modal").classList.remove("hidden");
-      lucide.createIcons();
+      showModal({
+        title: "ยืนยันการลบใบงาน",
+        desc: `คุณต้องการลบใบงานรหัส ${jobId} ใช่หรือไม่?`,
+        confirmText: "ลบใบงาน",
+        confirmClass: "bg-red-600 hover:bg-red-700",
+        iconName: "alert-triangle",
+        iconClass: "bg-red-50 text-red-600",
+        onConfirm: async () => {
+          try {
+            const res = await fetch('/api/delete_job', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ id: jobId })
+            });
+            const data = await res.json();
+
+            if (data.success) {
+              delete localJobs[jobId];
+              showToast(`ลบใบงาน ${jobId} สำเร็จ`);
+              fetchGoogleSheetsData();
+            } else {
+              showToast(data.message || "ลบข้อมูลไม่สำเร็จ");
+            }
+          } catch (err) {
+            console.error(err);
+            showToast("เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์");
+          }
+        }
+      });
     }
 
     function renderQueueList(queueJobs) {
