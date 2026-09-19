@@ -465,15 +465,21 @@
          <h2 class="m-0 text-sm font-bold text-[#0F172A]">เชื่อมต่อกลุ่ม LINE (LINE Groups)</h2>
          <p class="mt-1 text-xs text-[#64748B]">เพิ่ม Group ID เพื่อส่งสรุปใบงานไปยังกลุ่มที่ต้องการ (พิมพ์คำสั่งหา ID จากบอทในกลุ่ม)</p>
         </div>
-        <button id="add-group-row" type="button" class="rounded-lg bg-[#EFF6FF] text-[#2563EB] px-3 py-1.5 text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1 w-fit">
+        <button id="open-add-group-modal" type="button" class="rounded-lg bg-[#EFF6FF] text-[#2563EB] px-3 py-1.5 text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1 w-fit">
          <i data-lucide="plus" class="h-3.5 w-3.5"></i> เพิ่มกลุ่ม LINE
         </button>
        </div>
 
-       <div id="line-groups-container" class="space-y-3 mt-4">
-        <!-- แถวรายการกลุ่มจะถูกเพิ่มที่นี่ผ่าน JavaScript -->
+       <!-- ซ่อนรายการทั้งหมดไว้ แสดงเป็นแบบย่อหรือกดจัดการ -->
+       <div class="border-t pt-4">
+        <button type="button" onclick="toggleSectionList('line-groups-container', this)" class="text-gray-600 hover:text-blue-600 text-xs font-medium flex items-center gap-2 mb-2">
+         <span>📁 แสดง/ซ่อน รายการกลุ่ม LINE ทั้งหมด</span>
+        </button>
+        <div id="line-groups-container" class="space-y-3 mt-2 hidden">
+         <!-- แถวรายการกลุ่มจะถูกเพิ่มที่นี่ผ่าน JavaScript -->
+        </div>
+        <p id="line-groups-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีการเชื่อมต่อกลุ่ม LINE</p>
        </div>
-       <p id="line-groups-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีการเชื่อมต่อกลุ่ม LINE</p>
       </article>
 
       <!-- ตั้งค่าถนนหลัก -->
@@ -483,15 +489,21 @@
          <h2 class="m-0 text-sm font-bold text-[#0F172A]">ถนนหลัก</h2>
          <p class="mt-1 text-xs text-[#64748B]">กำหนดรายการคำพ้องหรือชื่อถนนหลักที่ใช้จับคู่ในระบบ</p>
         </div>
-        <button id="add-road-row" type="button" class="rounded-lg bg-[#EFF6FF] text-[#2563EB] px-3 py-1.5 text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1 w-fit">
+        <button id="open-add-road-modal" type="button" class="rounded-lg bg-[#EFF6FF] text-[#2563EB] px-3 py-1.5 text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1 w-fit">
          <i data-lucide="plus" class="h-3.5 w-3.5"></i> เพิ่มถนนหลัก
         </button>
        </div>
 
-       <div id="roads-container" class="space-y-3 mt-4">
-        <!-- แถวรายการพจนานุกรมถนนจะถูกเพิ่มที่นี่ผ่าน JavaScript -->
+       <!-- ซ่อนรายการทั้งหมดไว้ -->
+       <div class="border-t pt-4">
+        <button type="button" onclick="toggleSectionList('roads-container', this)" class="text-gray-600 hover:text-blue-600 text-xs font-medium flex items-center gap-2 mb-2">
+         <span>📁 แสดง/ซ่อน รายการถนนหลักทั้งหมด</span>
+        </button>
+        <div id="roads-container" class="space-y-3 mt-2 hidden">
+         <!-- แถวรายการพจนานุกรมถนนจะถูกเพิ่มที่นี่ผ่าน JavaScript -->
+        </div>
+        <p id="roads-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีข้อมูลถนนหลัก</p>
        </div>
-       <p id="roads-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีข้อมูลถนนหลัก</p>
       </article>
 
       <!-- ตั้งค่าย่านสำคัญ -->
@@ -501,15 +513,21 @@
          <h2 class="m-0 text-sm font-bold text-[#0F172A]">ย่านสำคัญ</h2>
          <p class="mt-1 text-xs text-[#64748B]">กำหนดชื่อย่านสำคัญและคำที่เกี่ยวข้องในการจำแนกพื้นที่</p>
         </div>
-        <button id="add-area-row" type="button" class="rounded-lg bg-[#EFF6FF] text-[#2563EB] px-3 py-1.5 text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1 w-fit">
+        <button id="open-add-area-modal" type="button" class="rounded-lg bg-[#EFF6FF] text-[#2563EB] px-3 py-1.5 text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1 w-fit">
          <i data-lucide="plus" class="h-3.5 w-3.5"></i> เพิ่มย่านสำคัญ
         </button>
        </div>
 
-       <div id="areas-container" class="space-y-3 mt-4">
-        <!-- แถวรายการพจนานุกรมย่านจะถูกเพิ่มที่นี่ผ่าน JavaScript -->
+       <!-- ซ่อนรายการทั้งหมดไว้ -->
+       <div class="border-t pt-4">
+        <button type="button" onclick="toggleSectionList('areas-container', this)" class="text-gray-600 hover:text-blue-600 text-xs font-medium flex items-center gap-2 mb-2">
+         <span>📁 แสดง/ซ่อน รายการย่านสำคัญทั้งหมด</span>
+        </button>
+        <div id="areas-container" class="space-y-3 mt-2 hidden">
+         <!-- แถวรายการพจนานุกรมย่านจะถูกเพิ่มที่นี่ผ่าน JavaScript -->
+        </div>
+        <p id="areas-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีข้อมูลย่านสำคัญ</p>
        </div>
-       <p id="areas-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีข้อมูลย่านสำคัญ</p>
       </article>
 
       <button id="save-settings" type="button" class="mt-5 rounded-lg bg-[#2563EB] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 w-full sm:w-auto">บันทึกการตั้งค่า</button>
@@ -537,6 +555,25 @@
 
     </main>
    </div>
+  </div>
+
+  <!-- Dynamic Form Modal Popup (สำหรับเพิ่มข้อมูลแบบ Popup) -->
+  <div id="dynamic-form-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm hidden p-4">
+    <div class="page-card w-full max-w-md p-5 md:p-6 bg-white shadow-xl rounded-2xl">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="m-0 text-sm font-bold text-[#0F172A]" id="dynamic-modal-title">เพิ่มข้อมูล</h3>
+        <button type="button" onclick="closeDynamicModal()" class="text-gray-400 hover:text-gray-600">
+          <i data-lucide="x" class="h-4 w-4"></i>
+        </button>
+      </div>
+      <div id="dynamic-modal-body" class="space-y-3">
+        <!-- ช่องกรอกข้อมูลจะถูกใส่ที่นี่ตามประเภท -->
+      </div>
+      <div class="mt-6 flex justify-end gap-2">
+        <button type="button" onclick="closeDynamicModal()" class="rounded-lg border border-[#E2E8F0] px-4 py-2 text-xs font-medium text-[#64748B] hover:bg-[#F8FAFC]">ยกเลิก</button>
+        <button id="dynamic-modal-save" type="button" class="rounded-lg bg-blue-600 px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700">เพิ่มรายการ</button>
+      </div>
+    </div>
   </div>
 
   <!-- Custom Modal Popup -->
@@ -619,6 +656,16 @@
       document.querySelectorAll(".view").forEach(item => item.classList.toggle("active", item.id === view));
       document.querySelectorAll("[data-view]").forEach(item => item.classList.toggle("active", item.dataset.view === view));
       window.scrollTo({ top: 0, behavior: "smooth" });
+    }
+
+    function toggleSectionList(containerId, btnEl) {
+      const container = document.getElementById(containerId);
+      container.classList.toggle('hidden');
+      if (!container.classList.contains('hidden')) {
+        btnEl.querySelector('span').textContent = "📁 ซ่อนรายการทั้งหมด";
+      } else {
+        btnEl.querySelector('span').textContent = "📁 แสดง/ซ่อน รายการทั้งหมด";
+      }
     }
 
     function openJob(jobId) {
@@ -805,7 +852,7 @@
       }
       emptyText.classList.add('hidden');
       container.innerHTML = groups.map((item) => `
-        <div class="flex items-center gap-2 line-group-row">
+        <div class="flex items-center gap-2 line-group-row p-2 bg-gray-50 rounded-lg border border-gray-100">
           <input type="text" placeholder="ชื่อกลุ่ม (เช่น กลุ่มรถ โซน A)" value="${item.name || ''}" class="group-name-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
           <input type="text" placeholder="LINE Group ID (Cxxxxxxxx...)" value="${item.group_id || ''}" class="group-id-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs font-mono outline-none focus:border-[#2563EB]">
           <button type="button" onclick="confirmDeleteRow(this, '.line-group-row', toggleGroupsEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
@@ -845,7 +892,7 @@
       }
       emptyText.classList.add('hidden');
       container.innerHTML = entries.map((item) => `
-        <div class="flex items-center gap-2 road-row">
+        <div class="flex items-center gap-2 road-row p-2 bg-gray-50 rounded-lg border border-gray-100">
           <input type="text" placeholder="ชื่อถนนหลัก (Key)" value="${item.key || item.road || ''}" class="road-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
           <input type="text" placeholder="คำพ้อง/รายการย่อย (คั่นด้วยจุลภาค)" value="${item.value || (Array.isArray(item.aliases) ? item.aliases.join(', ') : '') || ''}" class="road-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
           <button type="button" onclick="confirmDeleteRow(this, '.road-row', toggleRoadsEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
@@ -885,7 +932,7 @@
       }
       emptyText.classList.add('hidden');
       container.innerHTML = entries.map((item) => `
-        <div class="flex items-center gap-2 area-row">
+        <div class="flex items-center gap-2 area-row p-2 bg-gray-50 rounded-lg border border-gray-100">
           <input type="text" placeholder="ชื่อย่านสำคัญ (Key)" value="${item.key || item.area || ''}" class="area-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
           <input type="text" placeholder="คำที่เกี่ยวข้อง (คั่นด้วยจุลภาค)" value="${item.value || (Array.isArray(item.keywords) ? item.keywords.join(', ') : '') || ''}" class="area-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
           <button type="button" onclick="confirmDeleteRow(this, '.area-row', toggleAreasEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
@@ -906,6 +953,128 @@
       }
     }
 
+    // Modal สำหรับกรอกข้อมูลแบบ Popup
+    function openDynamicModal(type) {
+      const modal = document.getElementById('dynamic-form-modal');
+      const titleEl = document.getElementById('dynamic-modal-title');
+      const bodyEl = document.getElementById('dynamic-modal-body');
+      const saveBtn = document.getElementById('dynamic-modal-save');
+
+      bodyEl.innerHTML = '';
+      if (type === 'group') {
+        titleEl.textContent = "เพิ่มกลุ่ม LINE";
+        bodyEl.innerHTML = `
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">ชื่อกลุ่ม</label>
+            <input type="text" id="modal-input-name" placeholder="เช่น กลุ่มรถ โซน A" class="w-full border rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">LINE Group ID</label>
+            <input type="text" id="modal-input-id" placeholder="Cxxxxxxxx..." class="w-full border rounded-lg px-3 py-2 text-xs font-mono outline-none focus:border-blue-500">
+          </div>
+        `;
+        saveBtn.onclick = () => {
+          const name = document.getElementById('modal-input-name').value.trim();
+          const groupId = document.getElementById('modal-input-id').value.trim();
+          if (!name || !groupId) {
+            showToast("กรุณากรอกข้อมูลให้ครบถ้วน");
+            return;
+          }
+          const container = document.getElementById('line-groups-container');
+          document.getElementById('line-groups-empty').classList.add('hidden');
+          const div = document.createElement('div');
+          div.className = "flex items-center gap-2 line-group-row p-2 bg-gray-50 rounded-lg border border-gray-100";
+          div.innerHTML = `
+            <input type="text" value="${name}" class="group-name-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+            <input type="text" value="${groupId}" class="group-id-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs font-mono outline-none focus:border-[#2563EB]">
+            <button type="button" onclick="confirmDeleteRow(this, '.line-group-row', toggleGroupsEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+              <i data-lucide="trash-2" class="h-4 w-4"></i>
+            </button>
+          `;
+          container.appendChild(div);
+          lucide.createIcons();
+          closeDynamicModal();
+          showToast("เพิ่มกลุ่ม LINE เรียบร้อยแล้ว");
+        };
+      } else if (type === 'road') {
+        titleEl.textContent = "เพิ่มถนนหลัก";
+        bodyEl.innerHTML = `
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">ชื่อถนนหลัก (Key)</label>
+            <input type="text" id="modal-input-key" placeholder="เช่น Thong Lo" class="w-full border rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">คำพ้อง / รายการย่อย (คั่นด้วยจุลภาค)</label>
+            <input type="text" id="modal-input-val" placeholder="เช่น ทองหล่อ, สุขุมวิท 55" class="w-full border rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500">
+          </div>
+        `;
+        saveBtn.onclick = () => {
+          const key = document.getElementById('modal-input-key').value.trim();
+          const val = document.getElementById('modal-input-val').value.trim();
+          if (!key) {
+            showToast("กรุณากรอกชื่อถนนหลัก");
+            return;
+          }
+          const container = document.getElementById('roads-container');
+          document.getElementById('roads-empty').classList.add('hidden');
+          const div = document.createElement('div');
+          div.className = "flex items-center gap-2 road-row p-2 bg-gray-50 rounded-lg border border-gray-100";
+          div.innerHTML = `
+            <input type="text" value="${key}" class="road-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+            <input type="text" value="${val}" class="road-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+            <button type="button" onclick="confirmDeleteRow(this, '.road-row', toggleRoadsEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+              <i data-lucide="trash-2" class="h-4 w-4"></i>
+            </button>
+          `;
+          container.appendChild(div);
+          lucide.createIcons();
+          closeDynamicModal();
+          showToast("เพิ่มถนนหลักเรียบร้อยแล้ว");
+        };
+      } else if (type === 'area') {
+        titleEl.textContent = "เพิ่มย่านสำคัญ";
+        bodyEl.innerHTML = `
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">ชื่อย่านสำคัญ (Key)</label>
+            <input type="text" id="modal-input-key" placeholder="เช่น สยาม" class="w-full border rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500">
+          </div>
+          <div>
+            <label class="block text-xs font-medium text-gray-700 mb-1">คำที่เกี่ยวข้อง (คั่นด้วยจุลภาค)</label>
+            <input type="text" id="modal-input-val" placeholder="เช่น สยามพารากอน, มาบุญครอง" class="w-full border rounded-lg px-3 py-2 text-xs outline-none focus:border-blue-500">
+          </div>
+        `;
+        saveBtn.onclick = () => {
+          const key = document.getElementById('modal-input-key').value.trim();
+          const val = document.getElementById('modal-input-val').value.trim();
+          if (!key) {
+            showToast("กรุณากรอกชื่อย่านสำคัญ");
+            return;
+          }
+          const container = document.getElementById('areas-container');
+          document.getElementById('areas-empty').classList.add('hidden');
+          const div = document.createElement('div');
+          div.className = "flex items-center gap-2 area-row p-2 bg-gray-50 rounded-lg border border-gray-100";
+          div.innerHTML = `
+            <input type="text" value="${key}" class="area-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+            <input type="text" value="${val}" class="area-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+            <button type="button" onclick="confirmDeleteRow(this, '.area-row', toggleAreasEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+              <i data-lucide="trash-2" class="h-4 w-4"></i>
+            </button>
+          `;
+          container.appendChild(div);
+          lucide.createIcons();
+          closeDynamicModal();
+          showToast("เพิ่มย่านสำคัญเรียบร้อยแล้ว");
+        };
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    function closeDynamicModal() {
+      document.getElementById('dynamic-form-modal').classList.add('hidden');
+    }
+
     function confirmDeleteRow(btn, rowSelector, checkEmptyFunc) {
       showModal({
         title: "ยืนยันการลบรายการ",
@@ -923,61 +1092,19 @@
     }
 
     document.addEventListener("DOMContentLoaded", () => {
-      const addGroupBtn = document.getElementById('add-group-row');
-      if (addGroupBtn) {
-        addGroupBtn.addEventListener('click', () => {
-          const container = document.getElementById('line-groups-container');
-          document.getElementById('line-groups-empty').classList.add('hidden');
-          const div = document.createElement('div');
-          div.className = "flex items-center gap-2 line-group-row";
-          div.innerHTML = `
-            <input type="text" placeholder="ชื่อกลุ่ม (เช่น กลุ่มรถ โซน A)" class="group-name-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-            <input type="text" placeholder="LINE Group ID (Cxxxxxxxx...)" class="group-id-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs font-mono outline-none focus:border-[#2563EB]">
-            <button type="button" onclick="confirmDeleteRow(this, '.line-group-row', toggleGroupsEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
-              <i data-lucide="trash-2" class="h-4 w-4"></i>
-            </button>
-          `;
-          container.appendChild(div);
-          lucide.createIcons();
-        });
+      const openAddGroupBtn = document.getElementById('open-add-group-modal');
+      if (openAddGroupBtn) {
+        openAddGroupBtn.addEventListener('click', () => openDynamicModal('group'));
       }
 
-      const addRoadBtn = document.getElementById('add-road-row');
-      if (addRoadBtn) {
-        addRoadBtn.addEventListener('click', () => {
-          const container = document.getElementById('roads-container');
-          document.getElementById('roads-empty').classList.add('hidden');
-          const div = document.createElement('div');
-          div.className = "flex items-center gap-2 road-row";
-          div.innerHTML = `
-            <input type="text" placeholder="ชื่อถนนหลัก (Key)" class="road-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-            <input type="text" placeholder="คำพ้อง/รายการย่อย (คั่นด้วยจุลภาค)" class="road-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-            <button type="button" onclick="confirmDeleteRow(this, '.road-row', toggleRoadsEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
-              <i data-lucide="trash-2" class="h-4 w-4"></i>
-            </button>
-          `;
-          container.appendChild(div);
-          lucide.createIcons();
-        });
+      const openAddRoadBtn = document.getElementById('open-add-road-modal');
+      if (openAddRoadBtn) {
+        openAddRoadBtn.addEventListener('click', () => openDynamicModal('road'));
       }
 
-      const addAreaBtn = document.getElementById('add-area-row');
-      if (addAreaBtn) {
-        addAreaBtn.addEventListener('click', () => {
-          const container = document.getElementById('areas-container');
-          document.getElementById('areas-empty').classList.add('hidden');
-          const div = document.createElement('div');
-          div.className = "flex items-center gap-2 area-row";
-          div.innerHTML = `
-            <input type="text" placeholder="ชื่อย่านสำคัญ (Key)" class="area-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-            <input type="text" placeholder="คำที่เกี่ยวข้อง (คั่นด้วยจุลภาค)" class="area-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-            <button type="button" onclick="confirmDeleteRow(this, '.area-row', toggleAreasEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
-              <i data-lucide="trash-2" class="h-4 w-4"></i>
-            </button>
-          `;
-          container.appendChild(div);
-          lucide.createIcons();
-        });
+      const openAddAreaBtn = document.getElementById('open-add-area-modal');
+      if (openAddAreaBtn) {
+        openAddAreaBtn.addEventListener('click', () => openDynamicModal('area'));
       }
 
       document.querySelectorAll("[data-view]").forEach(button => {
