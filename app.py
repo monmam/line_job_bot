@@ -334,9 +334,6 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if not raw_text:
         return {}
 
-    lines = [line.strip() for line in raw_text.strip().split('\n') if line.strip()]
-    
-    # ปรับให้ดึงรหัส F ตามจริง ถ้าไม่มีค่อยใช้ fallback_id ที่รันให้อัตโนมัติ
     id_match = re.search(r'\b(F\d+)\b', raw_text, re.IGNORECASE)
     job_id = id_match.group(1).strip() if id_match else fallback_id
 
@@ -355,39 +352,25 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if flight_match:
         flight_val = flight_match.group(1).strip()
 
+    # ดึงค่าจากแท็ก 【接รับ】 และ 【ส่ง】 โดยตรง 100% ตามรูปแบบในรูปภาพ
     pickup_raw = "-"
     dropoff_raw = "-"
-    pickup_mapped = "-"
-    dropoff_mapped = "-"
-    
-    route_line = ""
-    for line in lines:
-        if "-" in line and not any(k in line for k in ["【", "รหัส", "Order"]):
-            route_line = line
-            break
-            
-    if route_line:
-        parts = route_line.split("-")
-        if len(parts) > 2:
-            pickup_raw = "-".join(parts[:-1]).strip()
-            dropoff_raw = parts[-1].strip()
-        elif len(parts) == 2:
-            pickup_raw = parts[0].strip()
-            dropoff_raw = parts[1].strip()
-            
-        dropoff_raw = re.sub(r'[\),].*$', '', dropoff_raw).strip()
-        pickup_mapped, dropoff_mapped = parse_job_line(route_line)
-    else:
-        pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
-        if pickup_raw_match:
-            pickup_raw = pickup_raw_match.group(1).strip()
-        dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
-        if dropoff_raw_match:
-            dropoff_raw = dropoff_raw_match.group(1).strip()
-            
-        pickup_mapped = parse_location_rule_based(pickup_raw)
-        dropoff_mapped = parse_location_rule_based(dropoff_raw)
 
+    pickup_raw_match = re.search(r'【(?:接รับ|接|รับ)?[】\s]*(.+)', raw_text) # หาบรรทัดรับ
+    # หรือใช้แบบเจาะจงแท็ก:
+    pickup_tag = re.search(r'【接รับ】\s*(.+)', raw_text)
+    if pickup_tag:
+        pickup_raw = pickup_tag.group(1).strip()
+
+    dropoff_tag = re.search(r'【送ส่ง】\s*(.+)', raw_text)
+    if dropoff_tag:
+        dropoff_raw = dropoff_tag.group(1).strip()
+
+    # แปลงชื่อสถานที่
+    pickup_mapped = parse_location_rule_based(pickup_raw)
+    dropoff_mapped = parse_location_rule_based(dropoff_raw)
+
+    # จัดการเรื่องขนาดรถและราคา
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if car_raw_match:
         car_raw = car_raw_match.group(1).strip().upper()
