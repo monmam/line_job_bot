@@ -366,7 +366,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if dropoff_tag:
         dropoff_raw = dropoff_tag.group(1).strip()
 
-    # แปลงชื่อสถานที่
+    # แปลงชื่อสถานที่ (ตำแหน่งที่ 1 = pickup_mapped, ตำแหน่งที่ 2 = dropoff_mapped)
     pickup_mapped = parse_location_rule_based(pickup_raw)
     dropoff_mapped = parse_location_rule_based(dropoff_raw)
 
@@ -390,16 +390,16 @@ def parse_job_text(raw_text, fallback_id="F01"):
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
     order_val = order_match.group(1).strip() if order_match else "-"
 
-    # กำหนดเงื่อนไขไอคอนใหม่ตามโจทย์
-    if pickup_mapped in ["แอร์ดอน", "แอร์สุ"]:
-        # ยกเว้น: ถ้าจุดรับเป็น "แอร์สุ" แล้วจุดส่งเป็น "เพชรบุรี" ให้ใช้ 🥶
+    # กำหนดเงื่อนไขไอคอนตามตำแหน่งที่ 1 และตำแหน่งที่ 2
+    if dropoff_mapped in ["แอร์ดอน", "แอร์สุ"]:
+        # ถ้าตำแหน่งที่ 2 (จุดส่ง) เป็น แอร์ดอน หรือ แอร์สุ ให้ใช้ 🔥
+        icon_symbol = "🔥"
+    elif pickup_mapped in ["แอร์ดอน", "แอร์สุ"]:
+        # ถ้าตำแหน่งที่ 1 (จุดรับ) เป็น แอร์ดอน หรือ แอร์สุ (ตรวจสอบข้อยกเว้น แอร์สุ-เพชรบุรี)
         if pickup_mapped == "แอร์สุ" and "เพชรบุรี" in dropoff_mapped:
             icon_symbol = "🥶"
         else:
             icon_symbol = "🔥"
-    elif dropoff_mapped in ["แอร์ดอน", "แอร์สุ"]:
-        # ถ้าจุดส่งเป็นสนามบิน (เช่น คลองสาน-แอร์สุ, พญาไท-แอร์ดอน) ให้ใช้ 🔥
-        icon_symbol = "🔥"
     else:
         icon_symbol = "🥶"
 
