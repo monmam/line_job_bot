@@ -239,7 +239,7 @@ def parse_location_rule_based(raw_location):
         if kw and kw.lower() in cleaned.lower():
             return target if target else cleaned
 
-    # 1. ตรวจจับสนามบินดอนเมือง
+    # 1. ตรวจจับสนามบินดอนเมือง (รองรับ DMK, T1-T5, Don Mueang และคำว่าแอร์ดอนทั้งหมด)
     if any(k in upper_loc for k in ["DMK", "DON MUEANG", "แอร์ดอน"]) or re.search(r'DMK\s*T[1-5]', upper_loc):
         return "แอร์ดอน"
     
@@ -253,7 +253,7 @@ def parse_location_rule_based(raw_location):
 
     matched_th_road = ""
 
-    # 4. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT (รองรับทั้งแบบที่เป็น dict และ list แบบ UI ส่งมา)
+    # 4. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT
     if isinstance(current_main_roads, dict):
         for eng_road, th_road in current_main_roads.items():
             if eng_road.lower() in cleaned.lower() or th_road in cleaned:
