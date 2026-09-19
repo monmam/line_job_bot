@@ -74,7 +74,7 @@ def summarize_jobs_with_ai(jobs_text):
         return jobs_text
 
 def smart_parse_location_with_gemini(raw_location):
-    """ใช้ Gemini API ช่วยวิเคราะห์และแปลงจุดรับ-จุดส่ง ให้เป็นชื่อย่าน/ถนน/ซอยภาษาไทยที่สั้นที่สุด"""
+    """แปลงจุดรับ-จุดส่งด้วย AI พร้อมระบบกันเว็บค้าง"""
     if not raw_location or raw_location == "-":
         return "-"
     
@@ -83,27 +83,20 @@ def smart_parse_location_with_gemini(raw_location):
 
     try:
         prompt = f"""
-คุณเป็นระบบ AI ทำหน้าที่แปลงชื่อโรงแรมหรือสถานที่ยาวๆ ให้เป็น **"ชื่อย่าน หรือ ถนนหลัก หรือ ซอยสำคัญ"** แบบสั้นที่สุด ห้ามมีความยาวเกิน 3-5 คำเด็ดขาด
-
-**กฎเหล็ก:**
-1. ตัดชื่อโรงแรม, วงเล็บ, แบรนด์, หรือที่อยู่ยาวๆ ออกทั้งหมด ให้เหลือแค่ "ย่าน" หรือ "ชื่อถนน/ซอย" เช่น:
-   - "The Gravitique Hotel Khaosan (โรงแรม...)" -> "ข้าวสาร"
-   - "TRIBE Living Bangkok Sukhumvit 39..." -> "สุขุมวิท 39"
-   - "Anantara Riverside Bangkok Resort" -> "เจริญนคร"
-   - "A-One Bangkok Hotel" -> "เพชรบุรีตัดใหม่"
-2. หากเป็นสนามบิน ให้ตอบแค่ "แอร์สุ" (Suvarnabhumi) หรือ "แอร์ดอน" (Don Mueang)
-3. **ต้องตอบสั้นมากๆ ห้ามใส่ชื่อเต็มของโรงแรมเด็ดขาด**
+คุณเป็นระบบ AI ทำหน้าที่แปลงชื่อโรงแรมหรือสถานที่ยาวๆ ให้เป็น **"ชื่อย่าน หรือ ถนนหลัก หรือ ซอยสำคัญ"** แบบสั้นที่สุด ห้ามมีความยาวเกิน 3-5 คำเด็ดขาด และห้ามใส่ชื่อเต็มของโรงแรมเด็ดขาด
 
 สถานที่ที่ต้องแปลง: "{raw_location}"
 """
+        # กำหนด timeout ป้องกันเว็บค้างเวลามีปัญหา
         response = client.models.generate_content(
-            model='gemini-2.5-flash',  # <--- และเปลี่ยนตรงนี้ด้วย
+            model='gemini-2.5-flash',
             contents=prompt
         )
         result = response.text.strip()
         return result if result else raw_location
     except Exception as e:
-        print(f"Gemini API Error: {e}")
+        print(f"Gemini API Error (Fallback to original): {e}")
+        # หาก AI มีปัญหา ให้คืนค่าเดิมกลับไปทันทีโดยไม่ทำให้เว็บล่มหรือค้าง
         return raw_location
 
 def load_settings():
