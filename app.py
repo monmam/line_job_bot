@@ -37,7 +37,7 @@ timer_start_time = None
 latest_jobs = []        
 last_sender_id = None   
 
-# พจนานุกรมรายชื่อถนนหลัก (อังกฤษ = ไทย) - อัปเดตใหม่
+# พจนานุกรมรายชื่อถนนหลัก (อังกฤษ = ไทย)
 MAIN_ROADS_DICT = {
     "New Petchaburi": "เพชรบุรีตัดใหม่",
     "Sukhumvit": "สุขุมวิท",
@@ -45,6 +45,7 @@ MAIN_ROADS_DICT = {
     "Petchaburi": "เพชรบุรี",
     "Phetchaburi Rd": "เพชรบุรี",
     "Phetburi": "เพชรบุรี",
+    "Phra Nakhon": "พระนคร",
     "Rama 1": "พระรามที่ 1",
     "Rama 2": "พระรามที่ 2",
     "Rama 3": "พระรามที่ 3",
@@ -123,7 +124,7 @@ MAIN_ROADS_DICT = {
     "Phrannok": "พรานนก"
 }
 
-# พจนานุกรมรายชื่อย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่ - อัปเดตใหม่
+# พจนานุกรมรายชื่อย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่
 MAJOR_AREAS_DICT = {
     "Sukhumvit Road": "ถนนสุขุมวิท",
     "Khlong San": "คลองสาน",
@@ -163,23 +164,25 @@ def parse_location_rule_based(raw_location):
         return "-"
     
     cleaned = raw_location.strip()
-    
-    # 1. ตรวจจับสนามบินหลักเป็นกรณีพิเศษ
     upper_loc = cleaned.upper()
-    if any(k in upper_loc for k in ["DMK", "DON MUEANG", "แอร์ดอน"]):
+    
+    # 1. ตรวจจับสนามบินดอนเมือง และรูปแบบ DMK T1-T5 เป็นกรณีพิเศษ
+    if any(k in upper_loc for k in ["DMK", "DON MUEANG", "แอร์ดอน"]) or re.search(r'DMK\s*T[1-5]', upper_loc):
         return "แอร์ดอน"
+    
+    # 2. ตรวจจับสนามบินสุวรรณภูมิ
     elif any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ"]):
         return "แอร์สุ"
 
     matched_th_road = ""
 
-    # 2. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT (ทั้งอังกฤษและไทย)
+    # 3. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT (ทั้งอังกฤษและไทย)
     for eng_road, th_road in MAIN_ROADS_DICT.items():
         if eng_road.lower() in cleaned.lower() or th_road in cleaned:
             matched_th_road = th_road.strip()
             break
 
-    # 3. หากไม่เจอในถนนหลัก ลองเช็คใน MAJOR_AREAS_DICT
+    # 4. หากไม่เจอในถนนหลัก ลองเช็คใน MAJOR_AREAS_DICT
     if not matched_th_road:
         for area_eng, area_th in MAJOR_AREAS_DICT.items():
             if area_eng.lower() in cleaned.lower() or area_th in cleaned:
@@ -262,7 +265,10 @@ def parse_job_text(raw_text, fallback_id="F01"):
 
     lines = [line.strip() for line in raw_text.strip().split('\n') if line.strip()]
     
-    id_match = re.search(r'(?:รหัสใบงาน|Job ID|ID)[:\s]*([A-Za-z0-9_-]+)', raw_text, re.IGNORECASE)
+    # ค้นหารหัสใบงานที่ขึ้นต้นด้วย F ตามด้วยตัวเลข (เช่น F01, F02) เป็นอันดับแรกสุด
+    id_match = re.search(r'\b(F\d+)\b', raw_text, re.IGNORECASE)
+    if not id_match:
+        id_match = re.search(r'(?:รหัสใบงาน|Job ID|ID)[:\s]*([A-Za-z0-9_-]+)', raw_text, re.IGNORECASE)
     if not id_match and lines:
         id_match = re.search(r'^([A-Za-z0-9_-]+)', lines[0])
     job_id = id_match.group(1).strip() if id_match else fallback_id
