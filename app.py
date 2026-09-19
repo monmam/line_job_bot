@@ -7,7 +7,6 @@ import datetime
 from flask import Flask, request, abort, render_template, jsonify, redirect, url_for
 from linebot.v3.messaging import TextMessage, ReplyMessageRequest
 from dotenv import load_dotenv
-from google import genai
 
 # Import LINE SDK (v3)
 from linebot.v3 import WebhookHandler
@@ -26,11 +25,7 @@ app = Flask(__name__)
 
 LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "")
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GOOGLE_SPREADSHEET_ID = os.getenv("GOOGLE_SPREADSHEET_ID", "")
-
-# ตั้งค่า Gemini API Key
-client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
@@ -156,32 +151,62 @@ CAR_PRICING_MAP = {
     "CAMRY/7S": {"code": "7S", "price": "480"}
 }
 
-def smart_parse_location_with_gemini(raw_location):
-    """แปลงจุดรับ-จุดส่งด้วย AI พร้อมระบบจัดการเมื่อโควต้าเต็ม (Fallback)"""
+def parse_location_rule_based(raw_location):
+    """แปลงจุดรับ-จุดส่งด้วยกฎ (Rule-based) และตรวจจับซอยที่มีเลขโดยอัตโนมัติ"""
     if not raw_location or raw_location == "-":
         return "-"
     
-    if not client:
-        return raw_location
+    cleaned = raw_location.strip()
+    
+    # 1. ตรวจจับสนามบินหลักเป็นกรณีพิเศษ
+    upper_loc = cleaned.upper()
+    if any(k in upper_loc for k in ["DMK", "DON MUEANG", "แอร์ดอน"]):
+        return "แอร์ดอน"
+    elif any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ"]):
+        return "แอร์สุ"
 
-    try:
-        prompt = f"""
-คุณเป็นระบบ AI ทำหน้าที่แปลงชื่อโรงแรมหรือสถานที่ยาวๆ ให้เป็น **"ชื่อย่าน หรือ ถนนหลัก หรือ ซอยสำคัญ"** ตามมาตรฐาน ให้มีความสั้นที่สุด ห้ามมีความยาวเกิน 3-5 คำเด็ดขาด และห้ามใส่ชื่อเต็มของโรงแรมเด็ดขาด
+    matched_road = None
+    matched_th_road = ""
 
-สถานที่ที่ต้องแปลง: "{raw_location}"
-"""
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt
-        )
-        result = response.text.strip()
-        return result if result else raw_location
-    except Exception as e:
-        # หากติด Quota Exceeded (429) ให้ดึงคำแรกๆ หรือใช้ค่าเดิมแทนเพื่อไม่ให้ระบบพัง
-        print(f"Gemini API Quota/Error (Using fallback): {e}")
-        # ทำการตัดข้อความอย่างง่ายหาก AI ใช้ไม่ได้
-        words = raw_location.split()
-        return words[0] if words else raw_location
+    # 2. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT (ทั้งอังกฤษและไทย)
+    for eng_road, th_road in MAIN_ROADS_DICT.items():
+        if eng_road.lower() in cleaned.lower() or th_road in cleaned:
+            matched_road = eng_road
+            matched_th_road = th_road
+            break
+
+    # 3. หากไม่เจอในถนนหลัก ลองเช็คใน MAJOR_AREAS_DICT
+    if not matched_th_road:
+        for area_eng, area_th in MAJOR_AREAS_DICT.items():
+            if area_eng.lower() in cleaned.lower() or area_th in cleaned:
+                matched_th_road = area_th
+                break
+
+    # 4. ตรวจจับ "ซอยที่มีเลข" (เช่น Sukhumvit 24, Soi Sukhumvit 11, สุขุมวิท 24, ซอย 24)
+    # ค้นหาตัวเลขที่ตามหลังชื่อถนน หรือคำว่าซอย
+    soi_number_match = re.search(r'(?:soi|ซอย)?\s*(\d+)', cleaned, re.IGNORECASE)
+    
+    if matched_th_road and soi_number_match:
+        # กรองไม่ให้เอาตัวเลขปีหรือตัวเลขที่ไม่ใช่ซอย (เช่น เลขตึกยาวๆ ถ้ามีคำว่าซอยหรือเว้นวรรคชัดเจน)
+        # เช็คว่ามีคำว่า soi หรือ ซอย หรือตัวเลขอยู่ใกล้ชื่อถนนไหม
+        number_str = soi_number_match.group(1)
+        # ตรวจสอบเพิ่มเติมว่าตัวเลขนี้อยู่หลังชื่อถนนจริงหรือไม่
+        if re.search(rf'({matched_road}|{matched_th_road}).*?(\d+)', cleaned, re.IGNORECASE):
+            return f"{matched_th_road} ซอย {number_str}"
+        elif "ซอย" in cleaned or "SOI" in cleaned.upper():
+            return f"{matched_th_road} ซอย {number_str}"
+
+    # ถ้าเจอแค่ชื่อถนนหลัก
+    if matched_th_road:
+        return matched_th_road
+
+    # ถ้าเจอแค่คำว่า "ซอย [ตัวเลข]" โดดๆ
+    soi_only_match = re.search(r'(?:ซอย|soi)\s*(\d+)', cleaned, re.IGNORECASE)
+    if soi_only_match:
+        return f"ซอย {soi_only_match.group(1)}"
+
+    # หากไม่ตรงเงื่อนไขใดเลย คืนค่าข้อความเดิมที่ทำความสะอาดแล้ว
+    return cleaned
 
 def parse_job_line(line_text):
     parts = line_text.split('-')
@@ -189,8 +214,8 @@ def parse_job_line(line_text):
         pickup_raw = parts[0].strip()
         dropoff_raw = parts[1].strip()
         
-        pickup_clean = smart_parse_location_with_gemini(pickup_raw)
-        dropoff_clean = smart_parse_location_with_gemini(dropoff_raw)
+        pickup_clean = parse_location_rule_based(pickup_raw)
+        dropoff_clean = parse_location_rule_based(dropoff_raw)
         
         return pickup_clean, dropoff_clean
     return line_text, "-"
@@ -296,14 +321,8 @@ def parse_job_text(raw_text, fallback_id="F01"):
         if dropoff_raw_match:
             dropoff_raw = dropoff_raw_match.group(1).strip()
             
-        pickup_mapped = smart_parse_location_with_gemini(pickup_raw)
-        dropoff_mapped = smart_parse_location_with_gemini(dropoff_raw)
-
-    pickup_upper = pickup_raw.upper().strip()
-    if any(k in pickup_upper for k in ["DMK", "DON MUEANG", "แอร์ดอน"]):
-        pickup_mapped = "แอร์ดอน"
-    elif any(k in pickup_upper for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ"]):
-        pickup_mapped = "แอร์สุ"
+        pickup_mapped = parse_location_rule_based(pickup_raw)
+        dropoff_mapped = parse_location_rule_based(dropoff_raw)
 
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if car_raw_match:
@@ -616,7 +635,7 @@ def api_delete_job(job_id=None):
         else:
             return jsonify({"success": False, "message": "ไม่พบข้อมูลใน Google Sheets หรือเกิดข้อผิดพลาด"}), 404
             
-    except Exception as e:
+    except Exception, e:
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/api/clear_queue", methods=["POST"])
