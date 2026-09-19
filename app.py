@@ -402,6 +402,18 @@ def process_batch_jobs():
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
             
+            # 1. ส่งสรุปให้แอดมินใน LINE OA ก่อนเสมอ (ถ้ามี ID ของผู้ส่ง)
+            if target_sender_id:
+                try:
+                    push_request = PushMessageRequest(
+                        to=target_sender_id,
+                        messages=[TextMessage(text=summary_text)]
+                    )
+                    line_bot_api.push_message(push_request)
+                except Exception as e:
+                    print(f"❌ ส่งข้อความกลับหาผู้ส่ง (LINE OA) ล้มเหลว: {e}")
+
+            # 2. จากนั้นเช็คว่ามีกลุ่มเชื่อมต่อไว้ไหม ถ้ามีก็กระจายส่งเข้ากลุ่มด้วย
             if active_groups:
                 for grp in active_groups:
                     try:
@@ -412,16 +424,6 @@ def process_batch_jobs():
                         line_bot_api.push_message(push_request)
                     except Exception as e:
                         print(f"❌ ส่งข้อความไปยังกลุ่ม LINE ({grp.get('name')}) ล้มเหลว: {e}")
-            else:
-                if target_sender_id:
-                    try:
-                        push_request = PushMessageRequest(
-                            to=target_sender_id,
-                            messages=[TextMessage(text=summary_text)]
-                        )
-                        line_bot_api.push_message(push_request)
-                    except Exception as e:
-                        print(f"❌ ส่งข้อความกลับหาผู้ส่งล้มเหลว: {e}")
 
         for job in latest_jobs:
             for q_job in job_queue:
