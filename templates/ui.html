@@ -494,6 +494,42 @@
        <p id="keywords-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีเงื่อนไข Custom Keywords</p>
       </article>
 
+      <!-- ตั้งค่าพจนานุกรมถนนหลัก (MAIN_ROADS_DICT) -->
+      <article class="page-card mt-5 p-4 md:p-6">
+       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <div>
+         <h2 class="m-0 text-sm font-bold text-[#0F172A]">พจนานุกรมถนนหลัก (MAIN_ROADS_DICT)</h2>
+         <p class="mt-1 text-xs text-[#64748B]">กำหนดรายการคำพ้องหรือชื่อถนนหลักที่ใช้จับคู่ในระบบ</p>
+        </div>
+        <button id="add-road-row" type="button" class="rounded-lg bg-[#EFF6FF] text-[#2563EB] px-3 py-1.5 text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1 w-fit">
+         <i data-lucide="plus" class="h-3.5 w-3.5"></i> เพิ่มถนนหลัก
+        </button>
+       </div>
+
+       <div id="roads-container" class="space-y-3 mt-4">
+        <!-- แถวรายการพจนานุกรมถนนจะถูกเพิ่มที่นี่ผ่าน JavaScript -->
+       </div>
+       <p id="roads-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีข้อมูลพจนานุกรมถนนหลัก</p>
+      </article>
+
+      <!-- ตั้งค่าพจนานุกรมย่านสำคัญ (MAJOR_AREAS_DICT) -->
+      <article class="page-card mt-5 p-4 md:p-6">
+       <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
+        <div>
+         <h2 class="m-0 text-sm font-bold text-[#0F172A]">พจนานุกรมย่านสำคัญ (MAJOR_AREAS_DICT)</h2>
+         <p class="mt-1 text-xs text-[#64748B]">กำหนดชื่อย่านสำคัญและคำที่เกี่ยวข้องในการจำแนกพื้นที่</p>
+        </div>
+        <button id="add-area-row" type="button" class="rounded-lg bg-[#EFF6FF] text-[#2563EB] px-3 py-1.5 text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1 w-fit">
+         <i data-lucide="plus" class="h-3.5 w-3.5"></i> เพิ่มย่านสำคัญ
+        </button>
+       </div>
+
+       <div id="areas-container" class="space-y-3 mt-4">
+        <!-- แถวรายการพจนานุกรมย่านจะถูกเพิ่มที่นี่ผ่าน JavaScript -->
+       </div>
+       <p id="areas-empty" class="py-4 text-center text-xs text-[#94A3B8] hidden">ยังไม่มีข้อมูลพจนานุกรมย่านสำคัญ</p>
+      </article>
+
       <button id="save-settings" type="button" class="mt-5 rounded-lg bg-[#2563EB] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700 w-full sm:w-auto">บันทึกการตั้งค่า</button>
      </section>
 
@@ -748,6 +784,12 @@
         if (data.line_groups && Array.isArray(data.line_groups)) {
           renderLineGroupsInputs(data.line_groups);
         }
+        if (data.main_roads_dict) {
+          renderRoadsInputs(data.main_roads_dict);
+        }
+        if (data.major_areas_dict) {
+          renderAreasInputs(data.major_areas_dict);
+        }
       } catch (err) {
         console.error("Failed to load settings", err);
       }
@@ -819,6 +861,86 @@
       }
     }
 
+    function renderRoadsInputs(roadsDict) {
+      const container = document.getElementById('roads-container');
+      const emptyText = document.getElementById('roads-empty');
+      if (!container) return;
+
+      let entries = [];
+      if (Array.isArray(roadsDict)) {
+        entries = roadsDict;
+      } else if (typeof roadsDict === 'object' && roadsDict !== null) {
+        entries = Object.entries(roadsDict).map(([k, v]) => ({ key: k, value: Array.isArray(v) ? v.join(', ') : v }));
+      }
+
+      if (entries.length === 0) {
+        container.innerHTML = '';
+        emptyText.classList.remove('hidden');
+        return;
+      }
+      emptyText.classList.add('hidden');
+      container.innerHTML = entries.map((item) => `
+        <div class="flex items-center gap-2 road-row">
+          <input type="text" placeholder="ชื่อถนนหลัก (Key)" value="${item.key || item.road || ''}" class="road-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+          <input type="text" placeholder="คำพ้อง/รายการย่อย (คั่นด้วยจุลภาค เช่น ถนนสุขุมวิท, สุขุมวิท)" value="${item.value || (Array.isArray(item.aliases) ? item.aliases.join(', ') : '') || ''}" class="road-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+          <button type="button" onclick="this.closest('.road-row').remove(); toggleRoadsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+            <i data-lucide="trash-2" class="h-4 w-4"></i>
+          </button>
+        </div>
+      `).join('');
+      lucide.createIcons();
+    }
+
+    function toggleRoadsEmpty() {
+      const container = document.getElementById('roads-container');
+      const emptyText = document.getElementById('roads-empty');
+      if (container.children.length === 0) {
+        emptyText.classList.remove('hidden');
+      } else {
+        emptyText.classList.add('hidden');
+      }
+    }
+
+    function renderAreasInputs(areasDict) {
+      const container = document.getElementById('areas-container');
+      const emptyText = document.getElementById('areas-empty');
+      if (!container) return;
+
+      let entries = [];
+      if (Array.isArray(areasDict)) {
+        entries = areasDict;
+      } else if (typeof areasDict === 'object' && areasDict !== null) {
+        entries = Object.entries(areasDict).map(([k, v]) => ({ key: k, value: Array.isArray(v) ? v.join(', ') : v }));
+      }
+
+      if (entries.length === 0) {
+        container.innerHTML = '';
+        emptyText.classList.remove('hidden');
+        return;
+      }
+      emptyText.classList.add('hidden');
+      container.innerHTML = entries.map((item) => `
+        <div class="flex items-center gap-2 area-row">
+          <input type="text" placeholder="ชื่อย่านสำคัญ (Key)" value="${item.key || item.area || ''}" class="area-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+          <input type="text" placeholder="คำที่เกี่ยวข้อง (คั่นด้วยจุลภาค เช่น สีลม, สาทร, ช่องนนทรี)" value="${item.value || (Array.isArray(item.keywords) ? item.keywords.join(', ') : '') || ''}" class="area-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+          <button type="button" onclick="this.closest('.area-row').remove(); toggleAreasEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+            <i data-lucide="trash-2" class="h-4 w-4"></i>
+          </button>
+        </div>
+      `).join('');
+      lucide.createIcons();
+    }
+
+    function toggleAreasEmpty() {
+      const container = document.getElementById('areas-container');
+      const emptyText = document.getElementById('areas-empty');
+      if (container.children.length === 0) {
+        emptyText.classList.remove('hidden');
+      } else {
+        emptyText.classList.add('hidden');
+      }
+    }
+
     document.addEventListener("DOMContentLoaded", () => {
       const addKeywordBtn = document.getElementById('add-keyword-row');
       if (addKeywordBtn) {
@@ -850,6 +972,44 @@
             <input type="text" placeholder="ชื่อกลุ่ม (เช่น กลุ่มรถ โซน A)" class="group-name-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
             <input type="text" placeholder="LINE Group ID (Cxxxxxxxx...)" class="group-id-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs font-mono outline-none focus:border-[#2563EB]">
             <button type="button" onclick="this.closest('.line-group-row').remove(); toggleGroupsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+              <i data-lucide="trash-2" class="h-4 w-4"></i>
+            </button>
+          `;
+          container.appendChild(div);
+          lucide.createIcons();
+        });
+      }
+
+      const addRoadBtn = document.getElementById('add-road-row');
+      if (addRoadBtn) {
+        addRoadBtn.addEventListener('click', () => {
+          const container = document.getElementById('roads-container');
+          document.getElementById('roads-empty').classList.add('hidden');
+          const div = document.createElement('div');
+          div.className = "flex items-center gap-2 road-row";
+          div.innerHTML = `
+            <input type="text" placeholder="ชื่อถนนหลัก (Key)" class="road-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+            <input type="text" placeholder="คำพ้อง/รายการย่อย (คั่นด้วยจุลภาค)" class="road-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+            <button type="button" onclick="this.closest('.road-row').remove(); toggleRoadsEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+              <i data-lucide="trash-2" class="h-4 w-4"></i>
+            </button>
+          `;
+          container.appendChild(div);
+          lucide.createIcons();
+        });
+      }
+
+      const addAreaBtn = document.getElementById('add-area-row');
+      if (addAreaBtn) {
+        addAreaBtn.addEventListener('click', () => {
+          const container = document.getElementById('areas-container');
+          document.getElementById('areas-empty').classList.add('hidden');
+          const div = document.createElement('div');
+          div.className = "flex items-center gap-2 area-row";
+          div.innerHTML = `
+            <input type="text" placeholder="ชื่อย่านสำคัญ (Key)" class="area-key-input w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+            <input type="text" placeholder="คำที่เกี่ยวข้อง (คั่นด้วยจุลภาค)" class="area-val-input w-2/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+            <button type="button" onclick="this.closest('.area-row').remove(); toggleAreasEmpty();" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
               <i data-lucide="trash-2" class="h-4 w-4"></i>
             </button>
           `;
@@ -987,6 +1147,26 @@
           }
         });
 
+        const roadRows = document.querySelectorAll(".road-row");
+        const mainRoadsDict = {};
+        roadRows.forEach(row => {
+          const key = row.querySelector(".road-key-input").value.trim();
+          const valStr = row.querySelector(".road-val-input").value.trim();
+          if (key) {
+            mainRoadsDict[key] = valStr.split(',').map(s => s.trim()).filter(Boolean);
+          }
+        });
+
+        const areaRows = document.querySelectorAll(".area-row");
+        const majorAreasDict = {};
+        areaRows.forEach(row => {
+          const key = row.querySelector(".area-key-input").value.trim();
+          const valStr = row.querySelector(".area-val-input").value.trim();
+          if (key) {
+            majorAreasDict[key] = valStr.split(',').map(s => s.trim()).filter(Boolean);
+          }
+        });
+
         try {
           const res = await fetch('/api/save_settings', {
             method: 'POST',
@@ -994,7 +1174,9 @@
             body: JSON.stringify({ 
               waiting_time: waitingTimeVal,
               custom_keywords: customKeywords,
-              line_groups: lineGroups
+              line_groups: lineGroups,
+              main_roads_dict: mainRoadsDict,
+              major_areas_dict: majorAreasDict
             })
           });
           const data = await res.json();
