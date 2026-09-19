@@ -37,12 +37,14 @@ timer_start_time = None
 latest_jobs = []        
 last_sender_id = None   
 
-# พจนานุกรมรายชื่อถนนหลัก (อังกฤษ = ไทย)
+# พจนานุกรมรายชื่อถนนหลัก (อังกฤษ = ไทย) - อัปเดตใหม่
 MAIN_ROADS_DICT = {
     "New Petchaburi": "เพชรบุรีตัดใหม่",
     "Sukhumvit": "สุขุมวิท",
     "Phaholyothin": "พหลโยธิน",
     "Petchaburi": "เพชรบุรี",
+    "Phetchaburi Rd": "เพชรบุรี",
+    "Phetburi": "เพชรบุรี",
     "Rama 1": "พระรามที่ 1",
     "Rama 2": "พระรามที่ 2",
     "Rama 3": "พระรามที่ 3",
@@ -52,9 +54,10 @@ MAIN_ROADS_DICT = {
     "Rama 7": "พระรามที่ 7",
     "Rama 8": "พระรามที่ 8",
     "Rama 9": "พระรามที่ 9",
+    "Sathon": "สาทร",
     "Silom": "สีลม",
-    "North Sathorn": "สาทรเหนือ",
-    "South Sathorn": "สาทรใต้",
+    "North Sathon Road": "สาทรเหนือ",
+    "Charoennakorn Road": "เจริญนคร",
     "Surawong": "สุรวงศ์",
     "Ratchadamnoen Klang": "ราชดำเนินกลาง",
     "Ratchadamnoen Nok": "ราชดำเนินนอก",
@@ -120,9 +123,12 @@ MAIN_ROADS_DICT = {
     "Phrannok": "พรานนก"
 }
 
-# พจนานุกรมรายชื่อย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่
+# พจนานุกรมรายชื่อย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่ - อัปเดตใหม่
 MAJOR_AREAS_DICT = {
     "Sukhumvit Road": "ถนนสุขุมวิท",
+    "Khlong San": "คลองสาน",
+    "Phahonyothin": "ถนนพหลโยธิน",
+    "Phetchaburi": "ถนนเพชรบุรี",
     "Phahonyothin Road": "ถนนพหลโยธิน",
     "Phetchaburi Road": "ถนนเพชรบุรี",
     "Rama 1 Road": "ถนนพระรามที่ 1",
@@ -152,7 +158,7 @@ CAR_PRICING_MAP = {
 }
 
 def parse_location_rule_based(raw_location):
-    """แปลงจุดรับ-จุดส่งด้วยกฎ (Rule-based) และตรวจจับซอยที่มีเลขโดยอัตโนมัติ"""
+    """แปลงจุดรับ-จุดส่งด้วยกฎ และตัดคำว่าซอยกับตัวเลขออกให้เหลือแค่ชื่อถนน/ย่าน"""
     if not raw_location or raw_location == "-":
         return "-"
     
@@ -165,48 +171,29 @@ def parse_location_rule_based(raw_location):
     elif any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ"]):
         return "แอร์สุ"
 
-    matched_road = None
     matched_th_road = ""
 
     # 2. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT (ทั้งอังกฤษและไทย)
     for eng_road, th_road in MAIN_ROADS_DICT.items():
         if eng_road.lower() in cleaned.lower() or th_road in cleaned:
-            matched_road = eng_road
-            matched_th_road = th_road
+            matched_th_road = th_road.strip()
             break
 
     # 3. หากไม่เจอในถนนหลัก ลองเช็คใน MAJOR_AREAS_DICT
     if not matched_th_road:
         for area_eng, area_th in MAJOR_AREAS_DICT.items():
             if area_eng.lower() in cleaned.lower() or area_th in cleaned:
-                matched_th_road = area_th
+                matched_th_road = area_th.strip()
                 break
 
-    # 4. ตรวจจับ "ซอยที่มีเลข" (เช่น Sukhumvit 24, Soi Sukhumvit 11, สุขุมวิท 24, ซอย 24)
-    # ค้นหาตัวเลขที่ตามหลังชื่อถนน หรือคำว่าซอย
-    soi_number_match = re.search(r'(?:soi|ซอย)?\s*(\d+)', cleaned, re.IGNORECASE)
-    
-    if matched_th_road and soi_number_match:
-        # กรองไม่ให้เอาตัวเลขปีหรือตัวเลขที่ไม่ใช่ซอย (เช่น เลขตึกยาวๆ ถ้ามีคำว่าซอยหรือเว้นวรรคชัดเจน)
-        # เช็คว่ามีคำว่า soi หรือ ซอย หรือตัวเลขอยู่ใกล้ชื่อถนนไหม
-        number_str = soi_number_match.group(1)
-        # ตรวจสอบเพิ่มเติมว่าตัวเลขนี้อยู่หลังชื่อถนนจริงหรือไม่
-        if re.search(rf'({matched_road}|{matched_th_road}).*?(\d+)', cleaned, re.IGNORECASE):
-            return f"{matched_th_road} ซอย {number_str}"
-        elif "ซอย" in cleaned or "SOI" in cleaned.upper():
-            return f"{matched_th_road} ซอย {number_str}"
-
-    # ถ้าเจอแค่ชื่อถนนหลัก
+    # ถ้าเจอถนนหลักหรือย่าน ให้คืนค่าเฉพาะชื่อนั้นเลย (ตัดซอยและตัวเลขออกทั้งหมด)
     if matched_th_road:
         return matched_th_road
 
-    # ถ้าเจอแค่คำว่า "ซอย [ตัวเลข]" โดดๆ
-    soi_only_match = re.search(r'(?:ซอย|soi)\s*(\d+)', cleaned, re.IGNORECASE)
-    if soi_only_match:
-        return f"ซอย {soi_only_match.group(1)}"
-
-    # หากไม่ตรงเงื่อนไขใดเลย คืนค่าข้อความเดิมที่ทำความสะอาดแล้ว
-    return cleaned
+    # หากไม่ตรงในพจนานุกรม ให้ตัดคำว่า "ซอย [ตัวเลข]" ออกจากข้อความเดิมด้วย Regex ทิ้งไป
+    cleaned_no_soi = re.sub(r'(?:ซอย|soi)\s*\d+', '', cleaned, flags=re.IGNORECASE).strip()
+    
+    return cleaned_no_soi if cleaned_no_soi else cleaned
 
 def parse_job_line(line_text):
     parts = line_text.split('-')
@@ -635,7 +622,7 @@ def api_delete_job(job_id=None):
         else:
             return jsonify({"success": False, "message": "ไม่พบข้อมูลใน Google Sheets หรือเกิดข้อผิดพลาด"}), 404
             
-    except Exception, e:
+    except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
 @app.route("/api/clear_queue", methods=["POST"])
