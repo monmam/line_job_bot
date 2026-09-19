@@ -351,29 +351,35 @@ def parse_job_text(raw_text, fallback_id="F01"):
     pickup_mapped = "-"
     dropoff_mapped = "-"
     
-    route_line = ""
-    for line in lines:
-        if "-" in line and not any(k in line for k in ["【", "รหัส", "Order"]):
-            route_line = line
-            break
-            
-    if route_line:
-        parts = route_line.split("-", 1)
-        pickup_raw = parts[0].strip()
-        dropoff_raw = parts[1].strip()
-        dropoff_raw = re.sub(r'[\),].*$', '', dropoff_raw).strip()
-        
-        pickup_mapped, dropoff_mapped = parse_job_line(route_line)
-    else:
-        pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
-        if pickup_raw_match:
-            pickup_raw = pickup_raw_match.group(1).strip()
-        dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
-        if dropoff_raw_match:
-            dropoff_raw = dropoff_raw_match.group(1).strip()
-            
-        pickup_mapped = parse_location_rule_based(pickup_raw)
-        dropoff_mapped = parse_location_rule_based(dropoff_raw)
+    # 1. ดึงจากแท็ก 【接รับ】 และ 【ส่งส่ง】 พร้อมตัดวงเล็บหรือคอมมาส่วนเกินออกให้สะอาด
+    pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
+    if pickup_raw_match:
+        pickup_raw = pickup_raw_match.group(1).strip()
+        pickup_raw = re.split(r'[\(,\)]', pickup_raw)[0].strip()
+
+    dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
+    if dropoff_raw_match:
+        dropoff_raw = dropoff_raw_match.group(1).strip()
+        dropoff_raw = re.split(r'[\(,\)]', dropoff_raw)[0].strip()
+
+    # 2. หากในแท็กไม่มีข้อมูล ค่อยไปหาจากบรรทัดที่มีเครื่องหมาย - ทั่วไป
+    if pickup_raw == "-" or dropoff_raw == "-":
+        route_line = ""
+        for line in lines:
+            if "-" in line and not any(k in line for k in ["【", "รหัส", "Order"]):
+                route_line = line
+                break
+        if route_line:
+            parts = route_line.split("-", 1)
+            if pickup_raw == "-":
+                pickup_raw = parts[0].strip()
+            if dropoff_raw == "-":
+                dropoff_raw = parts[1].strip()
+                dropoff_raw = re.split(r'[\(,\)]', dropoff_raw)[0].strip()
+
+    # แปลงผ่าน Rule-based
+    pickup_mapped = parse_location_rule_based(pickup_raw)
+    dropoff_mapped = parse_location_rule_based(dropoff_raw)
 
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if car_raw_match:
@@ -416,7 +422,6 @@ def add_job_to_queue(text, sender_id=None):
 
     now_str = datetime.datetime.now().strftime("%H:%M:%S")
     
-    # คำนวณรหัสใบงานให้อัตโนมัติตามลำดับในคิวปัจจุบัน เพื่อป้องกัน F ชนกัน
     next_seq = len(job_queue) + len(latest_jobs) + 1
     fallback_id = f"F{next_seq:02d}"
     
@@ -445,7 +450,7 @@ def add_job_to_queue(text, sender_id=None):
         last_sender_id = sender_id
 
     latest_jobs.insert(0, job_item)
-    latest_jobs = latest_jobs[:50] # ขยายประวัติเก็บไว้รองรับหลายใบ
+    latest_jobs = latest_jobs[:50]
 
     if len(job_queue) == 1 and timer_thread is None:
         settings = load_settings()
@@ -480,7 +485,6 @@ def generate_batch_summary():
         blocks.append(f"📅 {d}")
         blocks.append("")
         
-        # จัดเรียงใบงานตามรหัส ID เสมอ (F01, F02, F03...)
         sorted_jobs = sorted(date_groups[d], key=lambda x: x.get("id", ""))
         
         for i, job in enumerate(sorted_jobs):
@@ -720,4 +724,3 @@ def api_clear_queue():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
-    
