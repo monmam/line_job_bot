@@ -65,7 +65,7 @@ def summarize_jobs_with_ai(jobs_text):
         return jobs_text
     try:
         response = client.models.generate_content(
-            model='gemini-2.5-flash',  # <--- เปลี่ยนตรงนี้
+            model='gemini-2.5-flash',
             contents=f"กรุณาสรุปข้อมูลใบงานเหล่านี้ให้กระชับ:\n{jobs_text}"
         )
         return response.text.strip()
@@ -74,7 +74,7 @@ def summarize_jobs_with_ai(jobs_text):
         return jobs_text
 
 def smart_parse_location_with_gemini(raw_location):
-    """แปลงจุดรับ-จุดส่งด้วย AI พร้อมระบบกันเว็บค้าง"""
+    """แปลงจุดรับ-จุดส่งด้วย AI ให้สั้นกระชับ (ห้ามเกิน 3-5 คำ และห้ามใส่ชื่อเต็มโรงแรม) พร้อมระบบกันเว็บค้าง"""
     if not raw_location or raw_location == "-":
         return "-"
     
@@ -87,7 +87,6 @@ def smart_parse_location_with_gemini(raw_location):
 
 สถานที่ที่ต้องแปลง: "{raw_location}"
 """
-        # กำหนด timeout ป้องกันเว็บค้างเวลามีปัญหา
         response = client.models.generate_content(
             model='gemini-2.5-flash',
             contents=prompt
@@ -96,8 +95,20 @@ def smart_parse_location_with_gemini(raw_location):
         return result if result else raw_location
     except Exception as e:
         print(f"Gemini API Error (Fallback to original): {e}")
-        # หาก AI มีปัญหา ให้คืนค่าเดิมกลับไปทันทีโดยไม่ทำให้เว็บล่มหรือค้าง
         return raw_location
+
+def parse_job_line(line_text):
+    """ฟังก์ชันแยกและจัดการจุดรับ-จุดส่งจากข้อความดิบ"""
+    parts = line_text.split('-')
+    if len(parts) >= 2:
+        pickup_raw = parts[0].strip()
+        dropoff_raw = parts[1].strip()
+        
+        pickup_clean = smart_parse_location_with_gemini(pickup_raw)
+        dropoff_clean = smart_parse_location_with_gemini(dropoff_raw)
+        
+        return pickup_clean, dropoff_clean
+    return line_text, "-"
 
 def load_settings():
     default_settings = {
@@ -149,7 +160,7 @@ def save_settings(data):
         json.dump(current, f, ensure_ascii=False, indent=2)
 
 def parse_job_text(raw_text, fallback_id="F01"):
-    """แกะข้อมูลใบงาน รองรับจุดรับ จุดส่ง และแปลงค่าอัตโนมัติด้วย Gemini AI"""
+    """แกะข้อมูลใบงาน รองรับการแยกจุดรับ-จุดส่ง และแปลงค่าอัตโนมัติด้วย Gemini AI"""
     if not raw_text:
         return {}
 
@@ -179,45 +190,45 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if flight_match:
         flight_val = flight_match.group(1).strip()
 
-    # 5. จุดรับ (Pickup)
-    pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
-    if pickup_raw_match:
-        pickup_raw = pickup_raw_match.group(1).strip()
-    else:
-        upper_text = raw_text.upper()
-        if "DMK" in upper_text:
-            pickup_raw = "DMK"
-        elif "BKK" in upper_text:
-            pickup_raw = "BKK"
-        else:
-            pickup_raw = "-"
-            
-    pickup_upper = pickup_raw.upper().strip()
-    if any(k in pickup_upper for k in ["DMK", "DON MUEANG"]):
-        pickup_mapped = "แอร์ดอน"
-    elif any(k in pickup_upper for k in ["BKK", "SUVARNABHUMI", "SVB"]):
-        pickup_mapped = "แอร์สุ"
-    else:
-        pickup_mapped = PICKUP_MAP.get(pickup_upper, pickup_raw)
-
-    # 6. จุดส่ง (Dropoff) - ใช้ Gemini AI ช่วยวิเคราะห์ตามกฎย่านและภาษา
+    # 5. จุดรับ (Pickup) และ จุดส่ง (Dropoff) - ใช้ฟังก์ชัน parse_job_line ช่วยแยก
+    pickup_raw = "-"
     dropoff_raw = "-"
-    dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
-    if dropoff_raw_match:
-        dropoff_raw = dropoff_raw_match.group(1).strip()
+    pickup_mapped = "-"
+    dropoff_mapped = "-"
+    
+    route_line = ""
+    for line in lines:
+        if "-" in line and not any(k in line for k in ["【", "รหัส", "Order"]):
+            route_line = line
+            break
+            
+    if route_line:
+        parts = route_line.split("-", 1)
+        pickup_raw = parts[0].strip()
+        dropoff_raw = parts[1].strip()
         dropoff_raw = re.sub(r'[\),].*$', '', dropoff_raw).strip()
+        
+        # เรียกใช้ parse_job_line
+        pickup_mapped, dropoff_mapped = parse_job_line(route_line)
     else:
-        for line in lines:
-            if any(k in line for k in ["【", "✈️", "รหัส", "Order", "380", "480"]) or ":" in line:
-                continue
-            if line != pickup_raw and line != time_val:
-                dropoff_raw = line
-                break
+        pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
+        if pickup_raw_match:
+            pickup_raw = pickup_raw_match.group(1).strip()
+        dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
+        if dropoff_raw_match:
+            dropoff_raw = dropoff_raw_match.group(1).strip()
+            
+        pickup_mapped = smart_parse_location_with_gemini(pickup_raw)
+        dropoff_mapped = smart_parse_location_with_gemini(dropoff_raw)
 
-    # เรียกใช้ Gemini AI สำหรับแปลงจุดส่ง
-    dropoff_mapped = smart_parse_location_with_gemini(dropoff_raw)
+    # ปรับแต่งจุดรับให้เป็นมาตรฐานถ้าเป็นสนามบิน
+    pickup_upper = pickup_raw.upper().strip()
+    if any(k in pickup_upper for k in ["DMK", "DON MUEANG", "แอร์ดอน"]):
+        pickup_mapped = "แอร์ดอน"
+    elif any(k in pickup_upper for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ"]):
+        pickup_mapped = "แอร์สุ"
 
-    # 7. ขนาดรถและราคา (Car & Price)
+    # 6. ขนาดรถและราคา (Car & Price)
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if car_raw_match:
         car_raw = car_raw_match.group(1).strip().upper()
@@ -232,7 +243,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
     car_code = car_info["code"]
     price_val = car_info["price"]
 
-    # 8. หมายเลขคำสั่งซื้อ (Order)
+    # 7. หมายเลขคำสั่งซื้อ (Order)
     order_match = re.search(r'(?:【(?:客户订单号|订单号|Order)】|Order|Order Number|คำสั่งซื้อ|Order ID)[:\s]*([0-9A-Za-z_-]+)', raw_text, re.IGNORECASE)
     if not order_match:
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
