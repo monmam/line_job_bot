@@ -356,13 +356,11 @@ def parse_job_text(raw_text, fallback_id="F01"):
     pickup_raw = "-"
     dropoff_raw = "-"
 
-    pickup_raw_match = re.search(r'【(?:接รับ|接|รับ)?[】\s]*(.+)', raw_text) # หาบรรทัดรับ
-    # หรือใช้แบบเจาะจงแท็ก:
     pickup_tag = re.search(r'【接รับ】\s*(.+)', raw_text)
     if pickup_tag:
         pickup_raw = pickup_tag.group(1).strip()
 
-    dropoff_tag = re.search(r'【送ส่ง】\s*(.+)', raw_text)
+    dropoff_tag = re.search(r'【ส่ง】\s*(.+)', raw_text)
     if dropoff_tag:
         dropoff_raw = dropoff_tag.group(1).strip()
 
@@ -390,7 +388,10 @@ def parse_job_text(raw_text, fallback_id="F01"):
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
     order_val = order_match.group(1).strip() if order_match else "-"
 
-    formatted_summary = f"{job_id}(🥶){time_val}/{price_val}#{car_code}\n{pickup_mapped}-{dropoff_mapped} ✈️{flight_val}\n{order_val}"
+    # กำหนดไอคอนตามเงื่อนไขจุดรับ (ถ้าเป็น แอร์ดอน หรือ แอร์สุ ใช้ 🔥 นอกนั้นใช้ 🥶)
+    icon_symbol = "🔥" if pickup_mapped in ["แอร์ดอน", "แอร์สุ"] else "🥶"
+
+    formatted_summary = f"{job_id}({icon_symbol}){time_val}/{price_val}#{car_code}\n{pickup_mapped}-{dropoff_mapped} ✈️{flight_val}\n{order_val}"
 
     return {
         "id": job_id,
