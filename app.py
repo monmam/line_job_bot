@@ -7,7 +7,7 @@ import datetime
 from flask import Flask, request, abort, render_template, jsonify, redirect, url_for
 from linebot.v3.messaging import TextMessage, ReplyMessageRequest
 from dotenv import load_dotenv
-import google.generativeai as genai
+from google import genai
 
 # Import LINE SDK (v3)
 from linebot.v3 import WebhookHandler
@@ -30,8 +30,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GOOGLE_SPREADSHEET_ID = os.getenv("GOOGLE_SPREADSHEET_ID", "")
 
 # ตั้งค่า Gemini API Key
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
