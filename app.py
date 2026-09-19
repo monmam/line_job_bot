@@ -61,12 +61,13 @@ CAR_PRICING_MAP = {
 
 def summarize_jobs_with_ai(jobs_text):
     """ฟังก์ชันสำหรับสรุปใบงานด้วย AI"""
-    if not GEMINI_API_KEY:
+    if not client:
         return jobs_text
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
-        prompt = f"กรุณาสรุปข้อมูลใบงานเหล่านี้ให้กระชับ:\n{jobs_text}"
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=f"กรุณาสรุปข้อมูลใบงานเหล่านี้ให้กระชับ:\n{jobs_text}"
+        )
         return response.text.strip()
     except Exception as e:
         print(f"AI Summary Error: {e}")
@@ -76,12 +77,11 @@ def smart_parse_location_with_gemini(raw_location):
     """ใช้ Gemini API ช่วยวิเคราะห์และแปลงจุดรับ-จุดส่ง ภาษาอังกฤษ ให้เป็นชื่อย่าน/ถนน/ซอยภาษาไทยตามกฎ"""
     if not raw_location or raw_location == "-":
         return "-"
-    
-    if not GEMINI_API_KEY:
+
+    if not client:
         return raw_location
 
     try:
-        model = genai.GenerativeModel('gemini-1.5-flash')
         prompt = f"""
 คุณเป็นผู้เชี่ยวชาญด้านการจัดการขนส่งและเส้นทางในกรุงเทพฯ 
 หน้าที่ของคุณคือแปลงชื่อสถานที่หรือโรงแรมภาษาอังกฤษ/ไทยด้านล่างนี้ ให้กลายเป็น **"ชื่อถนนหลัก, ซอยที่มีเลข, หรือย่านสำคัญ/เขตพื้นที่"** เป็นภาษาไทยที่สั้นและเข้าใจง่ายที่สุด (เช่น ทองหล่อ, สุขุมวิท 11, เพชรบุรีตัดใหม่, ประตูน้ำ, สยาม, อโศก, สีลม, สาทร, ข้าวสาร ฯลฯ)
@@ -93,7 +93,10 @@ def smart_parse_location_with_gemini(raw_location):
 
 สถานที่ที่ต้องแปลง: "{raw_location}"
 """
-        response = model.generate_content(prompt)
+        response = client.models.generate_content(
+            model='gemini-1.5-flash',
+            contents=prompt
+        )
         result = response.text.strip()
         return result if result else raw_location
     except Exception as e:
