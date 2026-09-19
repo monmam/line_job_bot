@@ -253,33 +253,48 @@ def parse_location_rule_based(raw_location):
 
     matched_th_road = ""
 
-    # 4. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT
+    # 4. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT (รองรับทั้งแบบ dict และ list อย่างปลอดภัย)
     if isinstance(current_main_roads, dict):
         for eng_road, th_road in current_main_roads.items():
-            if eng_road.lower() in cleaned.lower() or th_road in cleaned:
-                matched_th_road = th_road.strip()
+            # แปลงเป็น list เพื่อป้องกัน Error กรณีข้อมูลข้างในเป็น list หรือ string เดี่ยวๆ
+            eng_items = eng_road if isinstance(eng_road, list) else [eng_road]
+            th_items = th_road if isinstance(th_road, list) else [th_road]
+            
+            matched_eng = any(e and str(e).lower() in cleaned.lower() for e in eng_items if isinstance(e, str))
+            matched_th = any(t and str(t) in cleaned for t in th_items if isinstance(t, str))
+            
+            if matched_eng or matched_th:
+                matched_th_road = str(th_items[0]).strip() if th_items else str(eng_items[0]).strip()
                 break
     elif isinstance(current_main_roads, list):
         for item in current_main_roads:
             key = item.get("key", "")
             aliases = item.get("aliases", [])
-            if key.lower() in cleaned.lower() or any(alias.lower() in cleaned.lower() for alias in aliases):
-                matched_th_road = key.strip()
+            alias_list = aliases if isinstance(aliases, list) else [aliases]
+            if (key and str(key).lower() in cleaned.lower()) or any(a and str(a).lower() in cleaned.lower() for a in alias_list if isinstance(a, str)):
+                matched_th_road = str(key).strip()
                 break
 
     # 5. หากไม่เจอ ลองเช็คใน MAJOR_AREAS_DICT
     if not matched_th_road:
         if isinstance(current_major_areas, dict):
             for area_eng, area_th in current_major_areas.items():
-                if area_eng.lower() in cleaned.lower() or area_th in cleaned:
-                    matched_th_road = area_th.strip()
+                eng_items = area_eng if isinstance(area_eng, list) else [area_eng]
+                th_items = area_th if isinstance(area_th, list) else [area_th]
+                
+                matched_eng = any(e and str(e).lower() in cleaned.lower() for e in eng_items if isinstance(e, str))
+                matched_th = any(t and str(t) in cleaned for t in th_items if isinstance(t, str))
+                
+                if matched_eng or matched_th:
+                    matched_th_road = str(th_items[0]).strip() if th_items else str(eng_items[0]).strip()
                     break
         elif isinstance(current_major_areas, list):
             for item in current_major_areas:
                 key = item.get("key", "")
                 aliases = item.get("aliases", [])
-                if key.lower() in cleaned.lower() or any(alias.lower() in cleaned.lower() for alias in aliases):
-                    matched_th_road = key.strip()
+                alias_list = aliases if isinstance(aliases, list) else [aliases]
+                if (key and str(key).lower() in cleaned.lower()) or any(a and str(a).lower() in cleaned.lower() for a in alias_list if isinstance(a, str)):
+                    matched_th_road = str(key).strip()
                     break
 
     if matched_th_road:
