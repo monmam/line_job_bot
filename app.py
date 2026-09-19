@@ -352,19 +352,19 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if flight_match:
         flight_val = flight_match.group(1).strip()
 
-    # ดึงค่าจากแท็ก 【接รับ】 และ 【ส่ง】
+    # ดึงค่าจากแท็ก 【接รับ】 และ 【ส่ง】 หรือรูปแบบที่ใกล้เคียงอย่างแม่นยำ
     pickup_raw = "-"
     dropoff_raw = "-"
 
-    # ค้นหาบรรทัดหรือข้อความหลังแท็กรับ
     pickup_tag = re.search(r'【(?:接รับ|接|รับ)?[】]?\s*([^\n]+)', raw_text)
     if pickup_tag:
-        pickup_raw = pickup_tag.group(1).strip()
+        p_text = pickup_tag.group(1).strip()
+        pickup_raw = re.sub(r'^[【].*?[】]\s*', '', p_text)
 
-    # ค้นหาบรรทัดหรือข้อความหลังแท็กส่ง (รองรับทั้งภาษาจีนและไทย)
     dropoff_tag = re.search(r'【(?:送ส่ง|送|ส่ง)?[】]?\s*([^\n]+)', raw_text)
     if dropoff_tag:
-        dropoff_raw = dropoff_tag.group(1).strip()
+        d_text = dropoff_tag.group(1).strip()
+        dropoff_raw = re.sub(r'^[【].*?[】]\s*', '', d_text)
 
     # แปลงชื่อสถานที่
     pickup_mapped = parse_location_rule_based(pickup_raw)
@@ -390,15 +390,15 @@ def parse_job_text(raw_text, fallback_id="F01"):
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
     order_val = order_match.group(1).strip() if order_match else "-"
 
-    # กำหนดเงื่อนไขไอคอนตามโจทย์ใหม่
+    # กำหนดเงื่อนไขไอคอนตามโจทย์
     # 1. ถ้าจุดรับเป็น "แอร์ดอน" หรือ "แอร์สุ"
     if pickup_mapped in ["แอร์ดอน", "แอร์สุ"]:
-        # ยกเว้น: ถ้าจุดรับเป็น "แอร์สุ" แล้วจุดส่งเป็น "เพชรบุรี" ให้ใช้ 🥶
+        # ยกเว้น: ถ้าจุดรับเป็น "แอร์สุ" แล้วจุดส่งมีคำว่า "เพชรบุรี" ให้ใช้ 🥶
         if pickup_mapped == "แอร์สุ" and "เพชรบุรี" in dropoff_mapped:
             icon_symbol = "🥶"
         else:
             icon_symbol = "🔥"
-    # 2. ถ้าจุดส่งเป็น "แอร์ดอน" หรือ "แอร์สุ" (เช่น คลองสาน-แอร์สุ, พญาไท-แอร์ดอน) ให้ใช้ 🔥
+    # 2. ถ้าจุดส่งเป็น "แอร์ดอน" หรือ "แอร์สุ" (เช่น คลองสาน-แอร์สุ, พญาไท-แอร์ดอน) ให้เปลี่ยนเป็น 🔥
     elif dropoff_mapped in ["แอร์ดอน", "แอร์สุ"]:
         icon_symbol = "🔥"
     else:
