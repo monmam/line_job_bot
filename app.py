@@ -364,7 +364,7 @@ def handle_message(event):
     if not is_valid_form:
         return  # ถ้าไม่ใช่ใบงาน บอทจะเงียบและไม่ตอบอะไรกลับมา
         
-    # นำเข้าคิวรอประมวลผลแบบ Batch (จะส่งออกไปเมื่อครบกำหนดเวลา Timer เท่านั้น)
+    # นำเข้าคิวรอประมวลผลแบบ Batch
     add_job_to_queue(received_text, sender_id=user_id)
     
 @app.route("/")
