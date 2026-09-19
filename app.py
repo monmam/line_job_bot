@@ -48,13 +48,15 @@ MAIN_ROADS_DICT = {
     "Sukhumvit": "สุขุมวิท",
     "Phaholyothin": "พหลโยธิน",
     "Petchaburi": "เพชรบุรี",
-    "Rama I": "พระรามที่ 1",
-    "Rama II": "พระรามที่ 2",
-    "Rama III": "พระรามที่ 3",
-    "Rama IV": "พระรามที่ 4",
-    "Rama V": "พระรามที่ 5",
-    "Rama VI": "พระรามที่ 6",
-    "Rama IX": "พระรามที่ 9",
+    "Rama 1": "พระรามที่ 1",
+    "Rama 2": "พระรามที่ 2",
+    "Rama 3": "พระรามที่ 3",
+    "Rama 4": "พระรามที่ 4",
+    "Rama 5": "พระรามที่ 5",
+    "Rama 6": "พระรามที่ 6",
+    "Rama 7": "พระรามที่ 7",
+    "Rama 8": "พระรามที่ 8",
+    "Rama 9": "พระรามที่ 9",
     "Silom": "สีลม",
     "North Sathorn": "สาทรเหนือ",
     "South Sathorn": "สาทรใต้",
@@ -123,7 +125,7 @@ MAIN_ROADS_DICT = {
     "Phrannok": "พรานนก"
 }
 
-# พจนานุกรมรายชื่อย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่ (Roads Extension)
+# พจนานุกรมรายชื่อย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่
 MAJOR_AREAS_DICT = {
     "Sukhumvit Road": "ถนนสุขุมวิท",
     "Phahonyothin Road": "ถนนพหลโยธิน",
@@ -132,82 +134,16 @@ MAJOR_AREAS_DICT = {
     "Rama 2 Road": "ถนนพระรามที่ 2",
     "Rama 3 Road": "ถนนพระรามที่ 3",
     "Rama 4 Road": "ถนนพระรามที่ 4",
-    "Rama 5 Road": "ถนนพระรามที่ 5",
-    "Rama 6 Road": "ถนนพระรามที่ 6",
-    "Rama 9 Road": "ถนนพระรามที่ 9",
     "Silom Road": "ถนนสีลม",
-    "North Sathorn Road": "ถนนสาทรเหนือ",
-    "South Sathorn Road": "ถนนสาทรใต้",
-    "Surawong Road": "ถนนสุรวงศ์",
-    "Rajdamnoen Klang Road": "ถนนราชดำเนินกลาง",
-    "Rajdamnoen Nok Road": "ถนนราชดำเนินนอก",
-    "Rajdamnoen Nai Road": "ถนนราชดำเนินใน",
-    "Sanam Chai Road": "ถนนสนามไชย",
-    "Na Phra Lan Road": "ถนนหน้าพระลาน",
-    "Na Phra That Road": "ถนนหน้าพระธาตุ",
-    "Charoen Krung Road": "ถนนเจริญกรุง",
-    "Bamrung Mueang Road": "ถนนบำรุงเมือง",
-    "Fueang Nakhon Road": "ถนนเฟื่องนคร",
-    "Dinso Road": "ถนนดินสอ",
-    "Tanao Road": "ถนนตะนาว",
-    "Chakkraphong Road": "ถนนจักรพงษ์",
-    "Khaosan Road": "ถนนข้าวสาร",
-    "Phra Sumen Road": "ถนนพระสุเมรุ",
-    "Sam Sen Road": "ถนนสามเสน",
-    "Witthayu Road": "ถนนวิทยุ",
-    "Lang Suan Road": "ถนนหลังสวน",
-    "Chit Lom Road": "ถนนชิดลม",
-    "Ploenchit Road": "ถนนเพลินจิต",
-    "Ratchadamri Road": "ถนนราชดำริ",
-    "Henri Dunant Road": "ถนนอังรีดูนังต์",
-    "Phaya Thai Road": "ถนนพญาไท",
-    "Banthat Thong Road": "ถนนบรรทัดทอง",
-    "Rong Mueang Road": "ถนนรองเมือง",
-    "Chan Road": "ถนนจันทน์",
-    "Sathu Pradit Road": "ถนนสาธุประดิษฐ์",
-    "Nang Linchi Road": "ถนนนางลิ้นจี่",
-    "Chuea Phloeng Road": "ถนนเชื้อเพลิง",
-    "Yen Chit Road": "ถนนเย็นจิต",
-    "Naradhiwas Rajanagarindra Road": "ถนนนราธิวาสราชนครินทร์",
-    "Ratchadaphisek Road": "ถนนรัชดาภิเษก",
-    "Asok Montri Road": "ถนนอโศกมนตรี",
-    "Thong Lo Road": "ถนนทองหล่อ",
-    "Ekkamai Road": "ถนนเอกมัย",
-    "Pridi Banomyong Road": "ถนนปรีดี พนมยงค์",
-    "On Nut Road": "ถนนอ่อนนุช",
-    "Bang Na-Trat Road": "ถนนบางนา-ตราด",
-    "Srinakarin Road": "ถนนศรีนครินทร์",
-    "Phatthanakan Road": "ถนนพัฒนาการ",
-    "Ramkhamhaeng Road": "ถนนรามคำแหง",
-    "Lat Phrao Road": "ถนนลาดพร้าว",
-    "Pradit Manutham Road": "ถนนประดิษฐ์มนูธรรม",
-    "Ram Inthra Road": "ถนนรามอินทรา",
-    "Chaeng Watthana Road": "ถนนแจ้งวัฒนะ",
-    "Ngam Wong Wan Road": "ถนนงามวงศ์วาน",
-    "Tiwanon Road": "ถนนติวานนท์",
-    "Pracha Chuen Road": "ถนนประชาชื่น",
-    "Kamphaeng Phet Road": "ถนนกำแพงเพชร",
-    "Vibhavadi Rangsit Road": "ถนนวิภาวดีรังสิต",
-    "Sutthisan Winitchai Road": "ถนนสุทธิสารวินิจฉัย",
-    "Pracha Uthit Road": "ถนนประชาอุทิศ",
-    "Phutthamonthon Sai 1 Road": "ถนนพุทธมณฑลสาย 1",
-    "Phutthamonthon Sai 2 Road": "ถนนพุทธมณฑลสาย 2",
-    "Phutthamonthon Sai 3 Road": "ถนนพุทธมณฑลสาย 3",
-    "Phutthamonthon Sai 4 Road": "ถนนพุทธมณฑลสาย 4",
-    "Borommaratchachonnani Road": "ถนนบรมราชชนนี",
-    "Charan Sanitwong Road": "ถนนจรัญสนิทวงศ์",
-    "Arun Amarin Road": "ถนนอรุณอมรินทร์",
-    "Issaraphap Road": "ถนนอิสรภาพ",
-    "Prachathipok Road": "ถนนประชาธิปก",
-    "Somdet Phra Chao Tak Sin Road": "ถนนสมเด็จพระเจ้าตากสิน",
-    "Charoen Nakhon Road": "ถนนเจริญนคร",
-    "Rat Burana Road": "ถนนราษฎร์บูรณะ",
-    "Suksawat Road": "ถนนสุขสวัสดิ์",
-    "Ekkachai Road": "ถนนเอกชัย",
-    "Bang Khun Thian-Chai Thale Road": "ถนนบางขุนเทียน-ชายทะเล",
-    "Kanchanaphisek Road": "ถนนกาญจนาภิเษก",
-    "Outer Ring Road": "ถนนวงแหวนรอบนอก",
-    "Phrannok Road": "ถนนพรานนก"
+    "Sathorn Road": "ถนนสาทร",
+    "Asok": "อโศก",
+    "Thong Lo": "ทองหล่อ",
+    "Ekkamai": "เอกมัย",
+    "Siam": "สยาม",
+    "Pratunam": "ประตูน้ำ",
+    "Khaosan": "ข้าวสาร",
+    "Silom": "สีลม",
+    "Sathorn": "สาทร"
 }
 
 # Dictionary สำหรับ Map จุดรับ จุดส่ง ขนาดรถ และราคาตามกฎ
@@ -220,22 +156,8 @@ CAR_PRICING_MAP = {
     "CAMRY/7S": {"code": "7S", "price": "480"}
 }
 
-def summarize_jobs_with_ai(jobs_text):
-    """ฟังก์ชันสำหรับสรุปใบงานด้วย AI"""
-    if not client:
-        return jobs_text
-    try:
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=f"กรุณาสรุปข้อมูลใบงานเหล่านี้ให้กระชับ:\n{jobs_text}"
-        )
-        return response.text.strip()
-    except Exception as e:
-        print(f"AI Summary Error: {e}")
-        return jobs_text
-
 def smart_parse_location_with_gemini(raw_location):
-    """แปลงจุดรับ-จุดส่งด้วย AI ให้สั้นกระชับ โดยอ้างอิงจากรายชื่อถนนหลักและย่านสำคัญ"""
+    """แปลงจุดรับ-จุดส่งด้วย AI พร้อมระบบจัดการเมื่อโควต้าเต็ม (Fallback)"""
     if not raw_location or raw_location == "-":
         return "-"
     
@@ -244,7 +166,7 @@ def smart_parse_location_with_gemini(raw_location):
 
     try:
         prompt = f"""
-คุณเป็นระบบ AI ทำหน้าที่แปลงชื่อโรงแรมหรือสถานที่ยาวๆ ให้เป็น **"ชื่อย่าน หรือ ถนนหลัก หรือ ซอยสำคัญ"** ตามมาตรฐานรายชื่อถนนหลักในกรุงเทพฯ ให้มีความสั้นที่สุด ห้ามมีความยาวเกิน 3-5 คำเด็ดขาด และห้ามใส่ชื่อเต็มของโรงแรมเด็ดขาด
+คุณเป็นระบบ AI ทำหน้าที่แปลงชื่อโรงแรมหรือสถานที่ยาวๆ ให้เป็น **"ชื่อย่าน หรือ ถนนหลัก หรือ ซอยสำคัญ"** ตามมาตรฐาน ให้มีความสั้นที่สุด ห้ามมีความยาวเกิน 3-5 คำเด็ดขาด และห้ามใส่ชื่อเต็มของโรงแรมเด็ดขาด
 
 สถานที่ที่ต้องแปลง: "{raw_location}"
 """
@@ -255,11 +177,13 @@ def smart_parse_location_with_gemini(raw_location):
         result = response.text.strip()
         return result if result else raw_location
     except Exception as e:
-        print(f"Gemini API Error (Fallback to original): {e}")
-        return raw_location
+        # หากติด Quota Exceeded (429) ให้ดึงคำแรกๆ หรือใช้ค่าเดิมแทนเพื่อไม่ให้ระบบพัง
+        print(f"Gemini API Quota/Error (Using fallback): {e}")
+        # ทำการตัดข้อความอย่างง่ายหาก AI ใช้ไม่ได้
+        words = raw_location.split()
+        return words[0] if words else raw_location
 
 def parse_job_line(line_text):
-    """ฟังก์ชันแยกและจัดการจุดรับ-จุดส่งจากข้อความดิบ"""
     parts = line_text.split('-')
     if len(parts) >= 2:
         pickup_raw = parts[0].strip()
@@ -321,29 +245,24 @@ def save_settings(data):
         json.dump(current, f, ensure_ascii=False, indent=2)
 
 def parse_job_text(raw_text, fallback_id="F01"):
-    """แกะข้อมูลใบงาน รองรับการแยกจุดรับ-จุดส่ง และแปลงค่าอัตโนมัติด้วย Gemini AI"""
     if not raw_text:
         return {}
 
     lines = [line.strip() for line in raw_text.strip().split('\n') if line.strip()]
     
-    # 1. รหัสใบงาน (Job ID)
     id_match = re.search(r'(?:รหัสใบงาน|Job ID|ID)[:\s]*([A-Za-z0-9_-]+)', raw_text, re.IGNORECASE)
     if not id_match and lines:
         id_match = re.search(r'^([A-Za-z0-9_-]+)', lines[0])
     job_id = id_match.group(1).strip() if id_match else fallback_id
 
-    # 2. วันที่ (Date)
     date_match = re.search(r'(?:【(?:日期วันที่|日期|วันที่)】|วันที่|Date)[:\s]*([\d/\-]+)', raw_text, re.IGNORECASE)
     date_val = date_match.group(1).strip() if date_match else "-"
 
-    # 3. เวลา (Time)
-    time_match = re.search(r'(?:【(?:เวลาเวลา|เวลา|时间时间|时间)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
+    time_match = re.search(r'(?:【(?:เวลาเวลา|เวลา|เวลา)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
     if not time_match:
         time_match = re.search(r'(\d{2}:\d{2})', raw_text)
     time_val = time_match.group(1).strip() if time_match else "-"
 
-    # 4. เที่ยวบิน (Flight)
     flight_val = "-"
     flight_match = re.search(r'(?:【(?:航班flight|航班|flight)】|เที่ยวบิน|flight|Flight)[:\s]*([A-Za-z0-9]+)', raw_text, re.IGNORECASE)
     if not flight_match:
@@ -351,7 +270,6 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if flight_match:
         flight_val = flight_match.group(1).strip()
 
-    # 5. จุดรับ (Pickup) และ จุดส่ง (Dropoff)
     pickup_raw = "-"
     dropoff_raw = "-"
     pickup_mapped = "-"
@@ -381,14 +299,12 @@ def parse_job_text(raw_text, fallback_id="F01"):
         pickup_mapped = smart_parse_location_with_gemini(pickup_raw)
         dropoff_mapped = smart_parse_location_with_gemini(dropoff_raw)
 
-    # ปรับแต่งจุดรับให้เป็นมาตรฐานถ้าเป็นสนามบิน
     pickup_upper = pickup_raw.upper().strip()
     if any(k in pickup_upper for k in ["DMK", "DON MUEANG", "แอร์ดอน"]):
         pickup_mapped = "แอร์ดอน"
     elif any(k in pickup_upper for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ"]):
         pickup_mapped = "แอร์สุ"
 
-    # 6. ขนาดรถและราคา (Car & Price)
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if car_raw_match:
         car_raw = car_raw_match.group(1).strip().upper()
@@ -403,7 +319,6 @@ def parse_job_text(raw_text, fallback_id="F01"):
     car_code = car_info["code"]
     price_val = car_info["price"]
 
-    # 7. หมายเลขคำสั่งซื้อ (Order)
     order_match = re.search(r'(?:【(?:客户订单号|订单号|Order)】|Order|Order Number|คำสั่งซื้อ|Order ID)[:\s]*([0-9A-Za-z_-]+)', raw_text, re.IGNORECASE)
     if not order_match:
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
