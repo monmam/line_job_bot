@@ -443,7 +443,7 @@ def handle_message(event):
                 )
             return
 
-    # เช็คแค่ว่ามีคำว่า 【客户订单号】 หรือไม่ ถ้ามีถือว่าเป็นใบงานทันที
+    # เช็คว่ามีคำว่า 【客户订单号】 หรือไม่ ถ้ามีถือว่าเป็นใบงานทันที
     is_valid_form = "【客户订单号】" in received_text
 
     if not is_valid_form:
@@ -452,10 +452,15 @@ def handle_message(event):
     settings = load_settings()
     connected_groups = settings.get("line_groups", []) 
 
+    # แปลงข้อความดิบให้เป็นรูปแบบสรุปย่อ (formatted_summary)
+    fallback_id = f"F{len(latest_jobs) + 1:02d}"
+    parsed_info = parse_job_text(received_text, fallback_id=fallback_id)
+    summary_msg = parsed_info["formatted_summary"]
+
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
         
-        # ส่งใบสรุปงานไปยังกลุ่มที่เชื่อมต่อไว้ในหน้า Settings โดยอัตโนมัติ (ทำงานแบบเงียบๆ ไม่ตอบแชทส่วนตัว)
+        # ส่ง "ข้อความสรุปย่อ" ไปยังกลุ่มที่เชื่อมต่อไว้ในหน้า Settings โดยอัตโนมัติ
         for group in connected_groups:
             g_id = group.get("group_id") 
             if g_id:
@@ -463,7 +468,7 @@ def handle_message(event):
                     line_bot_api.push_message(
                         PushMessageRequest(
                             to=g_id,
-                            messages=[TextMessage(text=f"{received_text}")]
+                            messages=[TextMessage(text=summary_msg)]
                         )
                     )
                 except Exception as e:
