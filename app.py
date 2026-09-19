@@ -65,7 +65,7 @@ def summarize_jobs_with_ai(jobs_text):
         return jobs_text
     try:
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-2.5-flash',  # <--- เปลี่ยนตรงนี้
             contents=f"กรุณาสรุปข้อมูลใบงานเหล่านี้ให้กระชับ:\n{jobs_text}"
         )
         return response.text.strip()
@@ -89,15 +89,15 @@ def smart_parse_location_with_gemini(raw_location):
 1. ตัดชื่อโรงแรม, วงเล็บ, แบรนด์, หรือที่อยู่ยาวๆ ออกทั้งหมด ให้เหลือแค่ "ย่าน" หรือ "ชื่อถนน/ซอย" เช่น:
    - "The Gravitique Hotel Khaosan (โรงแรม...)" -> "ข้าวสาร"
    - "TRIBE Living Bangkok Sukhumvit 39..." -> "สุขุมวิท 39"
-   - "Anantara Riverside Bangkok Resort" -> "เจริญนคร" หรือ "ริมแม่น้ำเจ้าพระยา"
-   - "A-One Bangkok Hotel" -> "เพชรบุรีตัดใหม่" หรือ "ศูนย์ پژوه"
+   - "Anantara Riverside Bangkok Resort" -> "เจริญนคร"
+   - "A-One Bangkok Hotel" -> "เพชรบุรีตัดใหม่"
 2. หากเป็นสนามบิน ให้ตอบแค่ "แอร์สุ" (Suvarnabhumi) หรือ "แอร์ดอน" (Don Mueang)
 3. **ต้องตอบสั้นมากๆ ห้ามใส่ชื่อเต็มของโรงแรมเด็ดขาด**
 
 สถานที่ที่ต้องแปลง: "{raw_location}"
 """
         response = client.models.generate_content(
-            model='gemini-1.5-flash',
+            model='gemini-2.5-flash',  # <--- และเปลี่ยนตรงนี้ด้วย
             contents=prompt
         )
         result = response.text.strip()
