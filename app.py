@@ -45,6 +45,7 @@ DEFAULT_MAIN_ROADS_DICT = {
     "Petchaburi": "เพชรบุรี",
     "Phetchaburi Rd": "เพชรบุรี",
     "Phetburi": "เพชรบุรี",
+    "Phra Nakhon": "พระนคร",
     "Rama 1": "พระรามที่ 1",
     "Rama 2": "พระรามที่ 2",
     "Rama 3": "พระรามที่ 3",
@@ -239,14 +240,14 @@ def parse_location_rule_based(raw_location):
         if kw and kw.lower() in cleaned.lower():
             return target if target else cleaned
 
-    # 1. ตรวจจับสนามบินดอนเมือง (รองรับ DMK, T1-T5, Don Mueang และคำว่าแอร์ดอนทั้งหมด)
-    if any(k in upper_loc for k in ["DMK", "DON MUEANG", "แอร์ดอน"]) or re.search(r'DMK\s*T[1-5]', upper_loc):
+    # 1. ตรวจจับสนามบินดอนเมือง (รองรับ DMK, T1-T5, Don Mueang, ดอนเมือง และคำว่าแอร์ดอนทั้งหมด)
+    if any(k in upper_loc for k in ["DMK", "DON MUEANG", "ดอนเมือง", "แอร์ดอน"]) or re.search(r'DMK\s*T[1-5]', upper_loc):
         return "แอร์ดอน"
     
     # 2. ตรวจจับสนามบินสุวรรณภูมิ
-    elif any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ"]):
+    elif any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ", "สุวรรณภูมิ"]):
         return "แอร์สุ"
-
+        
     # 3. ตรวจจับ Sukhumvit ตามด้วยเลขซอย ให้กลายเป็น สุขุมวิท
     if re.search(r'\bSukhumvit\s*\d+\b', cleaned, flags=re.IGNORECASE):
         return "สุขุมวิท"
