@@ -73,38 +73,37 @@ def summarize_jobs_with_ai(jobs_text):
         print(f"AI Summary Error: {e}")
         return jobs_text
 
-def smart_parse_location_with_gemini(raw_location):
-    """แปลงจุดรับ-จุดส่งด้วย AI โดยเน้นดึง ถนนหลัก, ซอยที่มีเลข หรือย่านสำคัญ และตัดชื่อโรงแรมออก"""
-    if not raw_location or raw_location == "-":
-        return "-"
-    
+def extract_pickup_dropoff_with_gemini(raw_text):
+    """ให้ Gemini AI วิเคราะห์ข้อความใบงานเพื่อดึงจุดรับและจุดส่งที่สะอาดและถูกต้องแม่นยำที่สุด"""
     if not client:
-        return raw_location
-
+        return "-", "-"
     try:
         prompt = f"""
-คุณเป็นระบบ AI ผู้เชี่ยวชาญด้านการจัดการข้อมูลการเดินทางในกรุงเทพฯ มีหน้าที่แปลงชื่อสถานที่/โรงแรมขนาดยาว ให้เหลือเพียง **"ชื่อย่าน, ถนนหลัก, หรือซอยที่มีเลข"** เท่านั้น
+คุณเป็นระบบ AI ผู้เชี่ยวชาญการจัดการข้อมูลการเดินทางในกรุงเทพฯ จงวิเคราะห์ข้อความใบงานด้านล่างนี้ แล้วแยก "จุดรับ" (Pickup) และ "จุดส่ง" (Dropoff) ให้ถูกต้อง
 
-**กฎเหล็กในการแปลง:**
-1. **เน้นถนนหลัก** ที่ปรากฏ เช่น พระราม 1, เพชรบุรี, สุขุมวิท, เจริญนคร, สาธร, พหลโยธิน เป็นต้น
-2. **เน้นซอยที่มีเลข** หากพบเลขซอยที่ชัดเจน เช่น ซอย 3, ซอย 15, ซอย 39 (ให้ระบุรูปแบบ เช่น สุขุมวิท 39 หรือ พหลโยธิน 3)
-3. **เน้นย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่** เช่น ข้าวสาร, สยาม, พระอาทิตย์, สีลม, รัชดา, พญาไท, คลองสาน
-4. **ห้ามใส่ชื่อเต็มของโรงแรมเด็ดขาด** (เช่น ตัดคำว่า Holiday Inn, Eastin Grand, The Standard ออกทั้งหมด)
-5. ความยาวต้องสั้นกระชับ ไม่เกิน 2-4 คำเท่านั้น
+**กฎเหล็กในการแปลงชื่อสถานที่:**
+1. หากเป็นสนามบิน ให้ใช้คำว่า "แอร์ดอน" (สำหรับ DMK) หรือ "แอร์สุ" (สำหรับ BKK) เท่านั้น
+2. สำหรับสถานที่ทั่วไป ให้ดึงเฉพาะ: **ถนนหลัก**, **ซอยที่มีเลข** (เช่น สุขุมวิท 39, พหลโยธิน 3), หรือ **ย่านสำคัญ / แหล่งท่องเที่ยว / เขตพื้นที่** (เช่น ข้าวสาร, สยาม, สาทร, เพชรบุรี, พญาไท)
+3. **ห้ามมีชื่อโรงแรมหรือชื่อตึกเต็มๆ หลุดมาเด็ดขาด** (ให้ตัดคำว่า Holiday Inn, Eastin Grand, The Standard, Anantara ทิ้งทั้งหมด)
+4. ความยาวแต่ละจุดต้องสั้นกระชับไม่เกิน 2-4 คำเท่านั้น
 
-สถานที่ที่ต้องแปลง: "{raw_location}"
-ให้ตอบกลับมาเฉพาะชื่อย่าน/ถนน/ซอยที่สั้นที่สุดทันที โดยไม่ต้องมีคำอธิบายเพิ่มเติม
+ข้อความใบงาน:
+{raw_text}
+
+โปรดตอบกลับในรูปแบบ JSON เท่านั้น โดยมี Key เป็น "pickup" และ "dropoff" เช่น:
+{{"pickup": "แอร์ดอน", "dropoff": "สยาม"}}
 """
         response = client.models.generate_content(
             model='gemini-2.5-flash',
-            contents=prompt
+            contents=prompt,
+            config={"response_mime_type": "application/json"}
         )
-        result = response.text.strip()
-        return result if result else raw_location
+        data = json.loads(response.text.strip())
+        return data.get("pickup", "-"), data.get("dropoff", "-")
     except Exception as e:
-        print(f"Gemini API Error (Fallback to original): {e}")
-        return raw_location
-
+        print(f"Gemini Extract Error: {e}")
+        return "-", "-"
+        
 def parse_job_line(line_text):
     """ฟังก์ชันแยกและจัดการจุดรับ-จุดส่งจากข้อความดิบ"""
     parts = line_text.split('-')
@@ -168,7 +167,7 @@ def save_settings(data):
         json.dump(current, f, ensure_ascii=False, indent=2)
 
 def parse_job_text(raw_text, fallback_id="F01"):
-    """แกะข้อมูลใบงาน รองรับการแยกจุดรับ-จุดส่ง และแปลงค่าอัตโนมัติด้วย Gemini AI"""
+    """แกะข้อมูลใบงานและดึงจุดรับ-จุดส่งด้วย Gemini AI อย่างแม่นยำ"""
     if not raw_text:
         return {}
 
@@ -185,7 +184,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
     date_val = date_match.group(1).strip() if date_match else "-"
 
     # 3. เวลา (Time)
-    time_match = re.search(r'(?:【(?:เวลาเวลา|เวลา|时间时间|时间)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
+    time_match = re.search(r'(?:【(?:เวลาเวลา|เวลา|시간시간|시간)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
     if not time_match:
         time_match = re.search(r'(\d{2}:\d{2})', raw_text)
     time_val = time_match.group(1).strip() if time_match else "-"
@@ -198,43 +197,8 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if flight_match:
         flight_val = flight_match.group(1).strip()
 
-    # 5. จุดรับ (Pickup) และ จุดส่ง (Dropoff) - ใช้ฟังก์ชัน parse_job_line ช่วยแยก
-    pickup_raw = "-"
-    dropoff_raw = "-"
-    pickup_mapped = "-"
-    dropoff_mapped = "-"
-    
-    route_line = ""
-    for line in lines:
-        if "-" in line and not any(k in line for k in ["【", "รหัส", "Order"]):
-            route_line = line
-            break
-            
-    if route_line:
-        parts = route_line.split("-", 1)
-        pickup_raw = parts[0].strip()
-        dropoff_raw = parts[1].strip()
-        dropoff_raw = re.sub(r'[\),].*$', '', dropoff_raw).strip()
-        
-        # เรียกใช้ parse_job_line
-        pickup_mapped, dropoff_mapped = parse_job_line(route_line)
-    else:
-        pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
-        if pickup_raw_match:
-            pickup_raw = pickup_raw_match.group(1).strip()
-        dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
-        if dropoff_raw_match:
-            dropoff_raw = dropoff_raw_match.group(1).strip()
-            
-        pickup_mapped = smart_parse_location_with_gemini(pickup_raw)
-        dropoff_mapped = smart_parse_location_with_gemini(dropoff_raw)
-
-    # ปรับแต่งจุดรับให้เป็นมาตรฐานถ้าเป็นสนามบิน
-    pickup_upper = pickup_raw.upper().strip()
-    if any(k in pickup_upper for k in ["DMK", "DON MUEANG", "แอร์ดอน"]):
-        pickup_mapped = "แอร์ดอน"
-    elif any(k in pickup_upper for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ"]):
-        pickup_mapped = "แอร์สุ"
+    # 5. ใช้ AI สกัดจุดรับและจุดส่งแบบแม่นยำ
+    pickup_mapped, dropoff_mapped = extract_pickup_dropoff_with_gemini(raw_text)
 
     # 6. ขนาดรถและราคา (Car & Price)
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
@@ -263,9 +227,9 @@ def parse_job_text(raw_text, fallback_id="F01"):
         "id": job_id,
         "date": date_val,
         "time": time_val,
-        "pickup_raw": pickup_raw,
+        "pickup_raw": pickup_mapped,
         "pickup": pickup_mapped,
-        "dropoff_raw": dropoff_raw,
+        "dropoff_raw": dropoff_mapped,
         "dropoff": dropoff_mapped,
         "flight": flight_val,
         "car_code": car_code,
