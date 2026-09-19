@@ -7,6 +7,7 @@ import datetime
 from flask import Flask, request, abort, render_template, jsonify, redirect, url_for
 from linebot.v3.messaging import TextMessage, ReplyMessageRequest
 from dotenv import load_dotenv
+import google.generativeai as genai
 
 # Import LINE SDK (v3)
 from linebot.v3 import WebhookHandler
@@ -16,8 +17,7 @@ from linebot.v3.messaging import (
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
-# Import local modules
-from ai import summarize_jobs_with_ai, smart_parse_location_with_gemini
+# Import local modules (เฉพาะส่วน Google Sheet)
 from google_sheet import save_to_google_sheets, get_sheet_client, delete_row_from_google_sheets
 
 load_dotenv()
@@ -28,6 +28,10 @@ LINE_CHANNEL_ACCESS_TOKEN = os.getenv("LINE_CHANNEL_ACCESS_TOKEN", "")
 LINE_CHANNEL_SECRET = os.getenv("LINE_CHANNEL_SECRET", "")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GOOGLE_SPREADSHEET_ID = os.getenv("GOOGLE_SPREADSHEET_ID", "")
+
+# ตั้งค่า Gemini API Key
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
 
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
@@ -55,6 +59,47 @@ CAR_PRICING_MAP = {
     "CAM/7S": {"code": "7S", "price": "480"},
     "CAMRY/7S": {"code": "7S", "price": "480"}
 }
+
+def summarize_jobs_with_ai(jobs_text):
+    """ฟังก์ชันสำหรับสรุปใบงานด้วย AI"""
+    if not GEMINI_API_KEY:
+        return jobs_text
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = f"กรุณาสรุปข้อมูลใบงานเหล่านี้ให้กระชับ:\n{jobs_text}"
+        response = model.generate_content(prompt)
+        return response.text.strip()
+    except Exception as e:
+        print(f"AI Summary Error: {e}")
+        return jobs_text
+
+def smart_parse_location_with_gemini(raw_location):
+    """ใช้ Gemini API ช่วยวิเคราะห์และแปลงจุดรับ-จุดส่ง ภาษาอังกฤษ ให้เป็นชื่อย่าน/ถนน/ซอยภาษาไทยตามกฎ"""
+    if not raw_location or raw_location == "-":
+        return "-"
+    
+    if not GEMINI_API_KEY:
+        return raw_location
+
+    try:
+        model = genai.GenerativeModel('gemini-1.5-flash')
+        prompt = f"""
+คุณเป็นผู้เชี่ยวชาญด้านการจัดการขนส่งและเส้นทางในกรุงเทพฯ 
+หน้าที่ของคุณคือแปลงชื่อสถานที่หรือโรงแรมภาษาอังกฤษ/ไทยด้านล่างนี้ ให้กลายเป็น **"ชื่อถนนหลัก, ซอยที่มีเลข, หรือย่านสำคัญ/เขตพื้นที่"** เป็นภาษาไทยที่สั้นและเข้าใจง่ายที่สุด (เช่น ทองหล่อ, สุขุมวิท 11, เพชรบุรีตัดใหม่, ประตูน้ำ, สยาม, อโศก, สีลม, สาทร, ข้าวสาร ฯลฯ)
+
+กฎการแปลง:
+1. หากเป็นสนามบิน ให้ใช้ "แอร์สุ" (สำหรับ Suvarnabhumi/BKK) หรือ "แอร์ดอน" (สำหรับ Don Mueang/DMK)
+2. หากเป็นโรงแรมหรือสถานที่ในย่านสำคัญ ให้แกะว่าอยู่ถนนหรือย่านไหน แล้วตอบเป็นชื่อย่าน/ถนนนั้นเป็นภาษาไทย
+3. ตอบเฉพาะชื่อสถานที่/ย่าน/ถนนที่เป็นผลลัพธ์สั้นๆ เท่านั้น ไม่ต้องมีคำอธิบายเพิ่ม
+
+สถานที่ที่ต้องแปลง: "{raw_location}"
+"""
+        response = model.generate_content(prompt)
+        result = response.text.strip()
+        return result if result else raw_location
+    except Exception as e:
+        print(f"Gemini API Error: {e}")
+        return raw_location
 
 def load_settings():
     default_settings = {
@@ -258,7 +303,6 @@ def generate_batch_summary():
     if not job_queue:
         return ""
 
-    # จัดกลุ่มใบงานตามวันที่จริงของแต่ละงาน
     date_groups = {}
     for job in job_queue:
         job_date = job.get("date", datetime.datetime.now().strftime("%d/%m/%Y"))
@@ -266,7 +310,6 @@ def generate_batch_summary():
             date_groups[job_date] = []
         date_groups[job_date].append(job)
 
-    # สร้างข้อความสรุปแยกตามแต่ละวัน
     blocks = []
     for d, jobs in date_groups.items():
         blocks.append(f"📅 {d}")
@@ -305,7 +348,6 @@ def process_batch_jobs():
         with ApiClient(configuration) as api_client:
             line_bot_api = MessagingApi(api_client)
             
-            # 1. ส่งสรุปให้แอดมินใน LINE OA ก่อนเสมอ (ถ้ามี ID ของผู้ส่ง)
             if target_sender_id:
                 try:
                     push_request = PushMessageRequest(
@@ -316,7 +358,6 @@ def process_batch_jobs():
                 except Exception as e:
                     print(f"❌ ส่งข้อความกลับหาผู้ส่ง (LINE OA) ล้มเหลว: {e}")
 
-            # 2. จากนั้นเช็คว่ามีกลุ่มเชื่อมต่อไว้ไหม ถ้ามีก็กระจายส่งเข้ากลุ่มด้วย
             if active_groups:
                 for grp in active_groups:
                     try:
@@ -358,13 +399,11 @@ def handle_message(event):
                 )
             return
 
-    # เช็คว่ามีคำว่า 【客户订单号】 หรือไม่ ถ้ามีถือว่าเป็นใบงานทันที
     is_valid_form = "【客户订单号】" in received_text
 
     if not is_valid_form:
-        return  # ถ้าไม่ใช่ใบงาน บอทจะเงียบและไม่ตอบอะไรกลับมา
+        return  
         
-    # นำเข้าคิวรอประมวลผลแบบ Batch
     add_job_to_queue(received_text, sender_id=user_id)
     
 @app.route("/")
