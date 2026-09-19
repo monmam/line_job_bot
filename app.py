@@ -681,4 +681,5 @@ def api_clear_queue():
     return jsonify({"success": True, "num_cleared": num_cleared, "message": "ล้าง Queue เรียบร้อยแล้ว"})
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port, debug=True)
