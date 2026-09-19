@@ -450,10 +450,11 @@ def handle_message(event):
         "【客户订单号】"
     ]
     
-    # is_valid_form = all(keyword in received_text for keyword in required_keywords)
+    # เช็คแค่ว่ามีคำว่า 【客户订单号】 หรือไม่ ถ้ามีถือว่าเป็นใบงานทันที
+    is_valid_form = "【客户订单号】" in received_text
 
-    # if not is_valid_form:
-    #     return  # ถ้าไม่มีคีย์เวิร์ดหลักเหล่านี้ ถึงจะข้ามไป
+    if not is_valid_form:
+        return  # ถ้าไม่มีคำนี้ บอทจะเงียบและไม่ตอบอะไรกลับมา
         
     settings = load_settings()
     connected_groups = settings.get("line_groups", []) 
