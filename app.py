@@ -464,22 +464,11 @@ def handle_message(event):
         
         if user_id:
             try:
-                line_bot_api.push_message(
-                    PushMessageRequest(
-                        to=user_id,
-                        messages=[TextMessage(text=f"📋 **ใบสรุปงาน (ส่งถึงคุณ):**\n\n{received_text}")]
-                    )
-                )
             except Exception as e:
                 print(f"Push summary to personal chat error: {e}")
 
         if source_type == 'user':
             try:
-                line_bot_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[TextMessage(text=f"✅ ประมวลผลและส่งใบสรุปงานเข้ากลุ่มเรียบร้อยแล้ว")]
-                    )
                 )
             except Exception as e:
                 print(f"Reply error: {e}")
