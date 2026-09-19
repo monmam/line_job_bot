@@ -443,20 +443,34 @@ def generate_batch_summary():
 
     date_groups = {}
     for job in job_queue:
-        job_date = job.get("date", datetime.datetime.now().strftime("%d/%m/%Y"))
+        raw_date = job.get("date", datetime.datetime.now().strftime("%d/%m/%Y"))
+        # แปลงรูปแบบวันที่ให้เป็นมาตรฐานเดียวกัน (ตัดเลข 0 ส่วนเกินออกเพื่อไม่ให้แยกกลุ่มซ้ำ)
+        try:
+            parsed_d = datetime.datetime.strptime(raw_date.replace('-', '/'), "%d/%m/%Y")
+            job_date = parsed_d.strftime("%d/%m/%Y")
+        except:
+            job_date = raw_date
+
         if job_date not in date_groups:
             date_groups[job_date] = []
         date_groups[job_date].append(job)
 
     blocks = []
-    for d, jobs in date_groups.items():
+    sorted_dates = sorted(date_groups.keys(), key=lambda x: datetime.datetime.strptime(x, "%d/%m/%Y"))
+
+    for d in sorted_dates:
         blocks.append(f"📅 {d}")
         blocks.append("")
-        for i, job in enumerate(jobs):
+        
+        # จัดเรียงใบงานตามรหัส ID (เช่น F01, F02, F03...)
+        sorted_jobs = sorted(date_groups[d], key=lambda x: x.get("id", ""))
+        
+        for i, job in enumerate(sorted_jobs):
             blocks.append(job["formatted_summary"])
-            if i < len(jobs) - 1:
+            if i < len(sorted_jobs) - 1:
                 blocks.append("")
-        if d != list(date_groups.keys())[-1]:
+                
+        if d != sorted_dates[-1]:
             blocks.append("")
 
     return "\n".join(blocks)
