@@ -388,8 +388,19 @@ def parse_job_text(raw_text, fallback_id="F01"):
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
     order_val = order_match.group(1).strip() if order_match else "-"
 
-    # กำหนดไอคอนตามเงื่อนไขจุดรับ (ถ้าเป็น แอร์ดอน หรือ แอร์สุ ใช้ 🔥 นอกนั้นใช้ 🥶)
-    icon_symbol = "🔥" if pickup_mapped in ["แอร์ดอน", "แอร์สุ"] else "🥶"
+    # กำหนดเงื่อนไขไอคอนตามโจทย์ใหม่
+    # 1. ถ้าจุดรับเป็น "แอร์ดอน" หรือ "แอร์สุ"
+    if pickup_mapped in ["แอร์ดอน", "แอร์สุ"]:
+        # ยกเว้น: ถ้าจุดรับเป็น "แอร์สุ" แล้วจุดส่งเป็น "เพชรบุรี" ให้ใช้ 🥶
+        if pickup_mapped == "แอร์สุ" and "เพชรบุรี" in dropoff_mapped:
+            icon_symbol = "🥶"
+        else:
+            icon_symbol = "🔥"
+    # 2. ถ้าจุดส่งเป็น "แอร์ดอน" หรือ "แอร์สุ" (เช่น คลองสาน-แอร์สุ, พญาไท-แอร์ดอน) ให้ใช้ 🔥
+    elif dropoff_mapped in ["แอร์ดอน", "แอร์สุ"]:
+        icon_symbol = "🔥"
+    else:
+        icon_symbol = "🥶"
 
     formatted_summary = f"{job_id}({icon_symbol}){time_val}/{price_val}#{car_code}\n{pickup_mapped}-{dropoff_mapped} ✈️{flight_val}\n{order_val}"
 
