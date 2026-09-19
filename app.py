@@ -356,14 +356,15 @@ def parse_job_text(raw_text, fallback_id="F01"):
     pickup_raw = "-"
     dropoff_raw = "-"
 
+    pickup_raw_match = re.search(r'【(?:接รับ|接|รับ)?[】\s]*(.+)', raw_text) # หาบรรทัดรับ
+    # หรือใช้แบบเจาะจงแท็ก:
     pickup_tag = re.search(r'【接รับ】\s*(.+)', raw_text)
     if pickup_tag:
         pickup_raw = pickup_tag.group(1).strip()
 
-    dropoff_tag = re.search(r'【(?:送ส่ง|ส่ง)?[】]?\s*(.+)', raw_text)
+    dropoff_tag = re.search(r'【送ส่ง】\s*(.+)', raw_text)
     if dropoff_tag:
-        d_text = dropoff_tag.group(1).strip()
-        dropoff_raw = re.sub(r'^[【].*?[】]\s*', '', d_text)
+        dropoff_raw = dropoff_tag.group(1).strip()
 
     # แปลงชื่อสถานที่
     pickup_mapped = parse_location_rule_based(pickup_raw)
@@ -389,7 +390,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
     order_val = order_match.group(1).strip() if order_match else "-"
 
-    # เงื่อนไขไอคอน: ถ้าตำแหน่งที่ 2 (จุดส่ง) เป็น แอร์ดอน หรือ แอร์สุ ใช้ 🔥 นอกนั้นใช้ 🥶
+    # เงื่อนไขไอคอน: ถ้าตำแหน่งที่ 2 (จุดส่ง) เป็น แอร์ดอน หรือ แอร์สุ ให้ใช้ 🔥 ที่เหลือใช้ 🥶
     if dropoff_mapped in ["แอร์ดอน", "แอร์สุ"]:
         icon_symbol = "🔥"
     else:
