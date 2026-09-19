@@ -324,7 +324,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
 
     lines = [line.strip() for line in raw_text.strip().split('\n') if line.strip()]
     
-    # ปรับให้ดึงรหัส F ตามจริง ถ้าไม่มีค่อยใช้ fallback_id ที่รันให้อัตโนมัติ
+    # ดึงรหัส F ตามจริง ถ้าไม่มีค่อยใช้ fallback_id
     id_match = re.search(r'\b(F\d+)\b', raw_text, re.IGNORECASE)
     job_id = id_match.group(1).strip() if id_match else fallback_id
 
@@ -345,32 +345,36 @@ def parse_job_text(raw_text, fallback_id="F01"):
 
     pickup_raw = "-"
     dropoff_raw = "-"
-    pickup_mapped = "-"
-    dropoff_mapped = "-"
     
-    route_line = ""
-    for line in lines:
-        if "-" in line and not any(k in line for k in ["【", "รหัส", "Order"]):
-            route_line = line
-            break
-            
-    if route_line:
-        parts = route_line.split("-", 1)
-        pickup_raw = parts[0].strip()
-        dropoff_raw = parts[1].strip()
+    # 1. ค้นหาจากแท็ก 【接รับ】 และ 【ส่งส่ง】 ก่อนเป็นอันดับแรกเสมอ เพื่อความแม่นยำ
+    pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
+    if pickup_raw_match:
+        pickup_raw = pickup_raw_match.group(1).strip()
+        pickup_raw = re.sub(r'[\),].*$', '', pickup_raw).strip()
+
+    dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
+    if dropoff_raw_match:
+        dropoff_raw = dropoff_raw_match.group(1).strip()
         dropoff_raw = re.sub(r'[\),].*$', '', dropoff_raw).strip()
-        
-        pickup_mapped, dropoff_mapped = parse_job_line(route_line)
-    else:
-        pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
-        if pickup_raw_match:
-            pickup_raw = pickup_raw_match.group(1).strip()
-        dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
-        if dropoff_raw_match:
-            dropoff_raw = dropoff_raw_match.group(1).strip()
-            
-        pickup_mapped = parse_location_rule_based(pickup_raw)
-        dropoff_mapped = parse_location_rule_based(dropoff_raw)
+
+    # 2. หากไม่เจอแท็ก ค่อยลองหาจากบรรทัดที่มีเครื่องหมาย - ทั่วไป
+    if pickup_raw == "-" or dropoff_raw == "-":
+        route_line = ""
+        for line in lines:
+            if "-" in line and not any(k in line for k in ["【", "รหัส", "Order"]):
+                route_line = line
+                break
+        if route_line:
+            parts = route_line.split("-", 1)
+            if pickup_raw == "-":
+                pickup_raw = parts[0].strip()
+            if dropoff_raw == "-":
+                dropoff_raw = parts[1].strip()
+                dropoff_raw = re.sub(r'[\),].*$', '', dropoff_raw).strip()
+
+    # แปลงผลลัพธ์ผ่านกฎ Rule-based
+    pickup_mapped = parse_location_rule_based(pickup_raw)
+    dropoff_mapped = parse_location_rule_based(dropoff_raw)
 
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if car_raw_match:
@@ -407,7 +411,6 @@ def parse_job_text(raw_text, fallback_id="F01"):
         "order": order_val,
         "formatted_summary": formatted_summary
     }
-
 def add_job_to_queue(text, sender_id=None):
     global job_queue, timer_thread, timer_start_time, latest_jobs, last_sender_id
 
