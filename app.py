@@ -355,17 +355,27 @@ def generate_batch_summary():
     if not job_queue:
         return ""
 
-    first_date = job_queue[0].get("date", datetime.datetime.now().strftime("%d/%m/%Y"))
-    
-    if len(job_queue) > 1:
-        lines = [f"📅 {first_date}", ""]
-        for i, job in enumerate(job_queue):
-            lines.append(job["formatted_summary"])
-            if i < len(job_queue) - 1:
-                lines.append("")
-        return "\n".join(lines)
-    else:
-        return f"📅 {first_date}\n\n{job_queue[0]['formatted_summary']}"
+    # จัดกลุ่มใบงานตามวันที่จริงของแต่ละงาน
+    date_groups = {}
+    for job in job_queue:
+        job_date = job.get("date", datetime.datetime.now().strftime("%d/%m/%Y"))
+        if job_date not in date_groups:
+            date_groups[job_date] = []
+        date_groups[job_date].append(job)
+
+    # สร้างข้อความสรุปแยกตามแต่ละวัน
+    blocks = []
+    for d, jobs in date_groups.items():
+        blocks.append(f"📅 {d}")
+        blocks.append("")
+        for i, job in enumerate(jobs):
+            blocks.append(job["formatted_summary"])
+            if i < len(jobs) - 1:
+                blocks.append("")
+        if d != list(date_groups.keys())[-1]:
+            blocks.append("")
+
+    return "\n".join(blocks)
 
 def process_batch_jobs():
     global job_queue, timer_thread, timer_start_time, last_sender_id
