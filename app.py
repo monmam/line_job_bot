@@ -227,33 +227,38 @@ def parse_location_rule_based(raw_location):
     cleaned = raw_location.strip()
     upper_loc = cleaned.upper()
     
+    # ดึงค่าพจนานุกรมปัจจุบันจาก settings
     settings = load_settings()
     current_main_roads = settings.get("main_roads_dict", DEFAULT_MAIN_ROADS_DICT)
     current_major_areas = settings.get("major_areas_dict", DEFAULT_MAJOR_AREAS_DICT)
     custom_keywords = settings.get("custom_keywords", [])
 
-    # 0. ตรวจสอบ Custom Keywords
+    # 0. ตรวจสอบ Custom Keywords ที่ผู้ใช้ตั้งค่าเพิ่มเอง
     for item in custom_keywords:
         kw = item.get("keyword", "").strip()
         target = item.get("zone", "").strip()
         if kw and kw.lower() in cleaned.lower():
             return target if target else cleaned
 
-    # 0.1 ตรวจจับสนามบินดอนเมือง
+    # 0.1 เพิ่มตัวดักจับกรณีเศษข้อความหลุด เช่น "ei Nuea" จาก Khlong Toei Nuea ให้ตีเป็นสุขุมวิท
+    if "EI NUEA" in upper_loc or "KHLONG TOEI" in upper_loc:
+        return "สุขุมวิท"
+
+    # 1. ตรวจจับสนามบินดอนเมือง (รองรับ DMK, T1-T5, Don Mueang, ดอนเมือง และคำว่าแอร์ดอนทั้งหมด)
     if any(k in upper_loc for k in ["DMK", "DON MUEANG", "ดอนเมือง", "แอร์ดอน"]) or re.search(r'DMK\s*T[1-5]', upper_loc):
         return "แอร์ดอน"
     
-    # 0.2 ตรวจจับสนามบินสุวรรณภูมิ
-    if any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ", "สุวรรณภูมิ"]):
+    # 2. ตรวจจับสนามบินสุวรรณภูมิ
+    elif any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ", "สุวรรณภูมิ"]):
         return "แอร์สุ"
-
-    # 0.3 ดักจับกรณี Khlong Toei Nuea หรือ Ei Nuea ให้ตีเป็นสุขุมวิท
-    if "EI NUEA" in upper_loc or "KHLONG TOEI" in upper_loc or "SUKHUMVIT" in upper_loc:
+        
+    # 3. ตรวจจับ Sukhumvit ตามด้วยเลขซอย ให้กลายเป็น สุขุมวิท
+    if re.search(r'\bSukhumvit\s*\d+\b', cleaned, flags=re.IGNORECASE):
         return "สุขุมวิท"
 
     matched_th_road = ""
 
-    # 1. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT
+    # 4. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT
     if isinstance(current_main_roads, dict):
         for eng_road, th_road in current_main_roads.items():
             eng_items = eng_road if isinstance(eng_road, list) else [eng_road]
@@ -265,25 +270,56 @@ def parse_location_rule_based(raw_location):
             if matched_eng or matched_th:
                 matched_th_road = str(th_items[0]).strip() if th_items else str(eng_items[0]).strip()
                 break
-
-    # 2. หากไม่เจอ ลองเช็คใน MAJOR_AREAS_DICT
-    if not matched_th_road and isinstance(current_major_areas, dict):
-        for area_eng, area_th in current_major_areas.items():
-            eng_items = area_eng if isinstance(area_eng, list) else [area_eng]
-            th_items = area_th if isinstance(area_th, list) else [area_th]
-            
-            matched_eng = any(e and str(e).lower() in cleaned.lower() for e in eng_items if isinstance(e, str))
-            matched_th = any(t and str(t) in cleaned for t in th_items if isinstance(t, str))
-            
-            if matched_eng or matched_th:
-                matched_th_road = str(th_items[0]).strip() if th_items else str(eng_items[0]).strip()
+    elif isinstance(current_main_roads, list):
+        for item in current_main_roads:
+            key = item.get("key", "")
+            aliases = item.get("aliases", [])
+            alias_list = aliases if isinstance(aliases, list) else [aliases]
+            if (key and str(key).lower() in cleaned.lower()) or any(a and str(a).lower() in cleaned.lower() for a in alias_list if isinstance(a, str)):
+                matched_th_road = str(key).strip()
                 break
+
+    # 5. หากไม่เจอ ลองเช็คใน MAJOR_AREAS_DICT
+    if not matched_th_road:
+        if isinstance(current_major_areas, dict):
+            for area_eng, area_th in current_major_areas.items():
+                eng_items = area_eng if isinstance(area_eng, list) else [area_eng]
+                th_items = area_th if isinstance(area_th, list) else [area_th]
+                
+                matched_eng = any(e and str(e).lower() in cleaned.lower() for e in eng_items if isinstance(e, str))
+                matched_th = any(t and str(t) in cleaned for t in th_items if isinstance(t, str))
+                
+                if matched_eng or matched_th:
+                    matched_th_road = str(th_items[0]).strip() if th_items else str(eng_items[0]).strip()
+                    break
+        elif isinstance(current_major_areas, list):
+            for item in current_major_areas:
+                key = item.get("key", "")
+                aliases = item.get("aliases", [])
+                alias_list = aliases if isinstance(aliases, list) else [aliases]
+                if (key and str(key).lower() in cleaned.lower()) or any(a and str(a).lower() in cleaned.lower() for a in alias_list if isinstance(a, str)):
+                    matched_th_road = str(key).strip()
+                    break
 
     if matched_th_road:
         return matched_th_road
 
+    # หากไม่ตรง ให้ตัดคำว่า "ซอย [ตัวเลข]" ออก
     cleaned_no_soi = re.sub(r'(?:ซอย|soi)\s*\d+', '', cleaned, flags=re.IGNORECASE).strip()
+    
     return cleaned_no_soi if cleaned_no_soi else cleaned
+
+def parse_job_line(line_text):
+    parts = line_text.split('-')
+    if len(parts) >= 2:
+        pickup_raw = parts[0].strip()
+        dropoff_raw = parts[1].strip()
+        
+        pickup_clean = parse_location_rule_based(pickup_raw)
+        dropoff_clean = parse_location_rule_based(dropoff_raw)
+        
+        return pickup_clean, dropoff_clean
+    return line_text, "-"
 
 def parse_job_text(raw_text, fallback_id="F01"):
     if not raw_text:
@@ -291,6 +327,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
 
     lines = [line.strip() for line in raw_text.strip().split('\n') if line.strip()]
     
+    # ปรับให้ดึงรหัส F ตามจริง ถ้าไม่มีค่อยใช้ fallback_id ที่รันให้อัตโนมัติ
     id_match = re.search(r'\b(F\d+)\b', raw_text, re.IGNORECASE)
     job_id = id_match.group(1).strip() if id_match else fallback_id
 
@@ -311,33 +348,32 @@ def parse_job_text(raw_text, fallback_id="F01"):
 
     pickup_raw = "-"
     dropoff_raw = "-"
-
-    # ดึงค่าจากแท็ก 【接รับ】 และ 【送ส่ง】 โดยตรง
-    pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
-    if pickup_raw_match:
-        pickup_raw = pickup_raw_match.group(1).strip()
-        # ตัดวงเล็บหรือคอมมาส่วนเกินออกให้สะอาด
-        pickup_raw = re.split(r'[\(,\)]', pickup_raw)[0].strip()
-
-    dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
-    if dropoff_raw_match:
-        dropoff_raw = dropoff_raw_match.group(1).strip()
-        dropoff_raw = re.split(r'[\(,\)]', dropoff_raw)[0].strip()
-
-    # หากไม่เจอแท็ก ชรอยไปหาบรรทัดที่มีเครื่องหมาย -
-    if pickup_raw == "-" or dropoff_raw == "-":
-        for line in lines:
-            if "-" in line and not any(k in line for k in ["【", "รหัส", "Order"]):
-                parts = line.split("-", 1)
-                if pickup_raw == "-":
-                    pickup_raw = parts[0].strip()
-                if dropoff_raw == "-":
-                    dropoff_raw = parts[1].strip()
-                    dropoff_raw = re.sub(r'[\),].*$', '', dropoff_raw).strip()
-                break
-
-    pickup_mapped = parse_location_rule_based(pickup_raw)
-    dropoff_mapped = parse_location_rule_based(dropoff_raw)
+    pickup_mapped = "-"
+    dropoff_mapped = "-"
+    
+    route_line = ""
+    for line in lines:
+        if "-" in line and not any(k in line for k in ["【", "รหัส", "Order"]):
+            route_line = line
+            break
+            
+    if route_line:
+        parts = route_line.split("-", 1)
+        pickup_raw = parts[0].strip()
+        dropoff_raw = parts[1].strip()
+        dropoff_raw = re.sub(r'[\),].*$', '', dropoff_raw).strip()
+        
+        pickup_mapped, dropoff_mapped = parse_job_line(route_line)
+    else:
+        pickup_raw_match = re.search(r'(?:【(?:接รับ|接|รับ)】|จุดรับ|Pickup|From)[:\s]*(.+)', raw_text, re.IGNORECASE)
+        if pickup_raw_match:
+            pickup_raw = pickup_raw_match.group(1).strip()
+        dropoff_raw_match = re.search(r'(?:【(?:送ส่ง|ส่ง|ส่ง)】|จุดส่ง|Dropoff|Drop-off|To)[:\s]*(.+)', raw_text, re.IGNORECASE)
+        if dropoff_raw_match:
+            dropoff_raw = dropoff_raw_match.group(1).strip()
+            
+        pickup_mapped = parse_location_rule_based(pickup_raw)
+        dropoff_mapped = parse_location_rule_based(dropoff_raw)
 
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if car_raw_match:
@@ -380,6 +416,7 @@ def add_job_to_queue(text, sender_id=None):
 
     now_str = datetime.datetime.now().strftime("%H:%M:%S")
     
+    # คำนวณรหัสใบงานให้อัตโนมัติตามลำดับในคิวปัจจุบัน เพื่อป้องกัน F ชนกัน
     next_seq = len(job_queue) + len(latest_jobs) + 1
     fallback_id = f"F{next_seq:02d}"
     
@@ -408,7 +445,7 @@ def add_job_to_queue(text, sender_id=None):
         last_sender_id = sender_id
 
     latest_jobs.insert(0, job_item)
-    latest_jobs = latest_jobs[:50]
+    latest_jobs = latest_jobs[:50] # ขยายประวัติเก็บไว้รองรับหลายใบ
 
     if len(job_queue) == 1 and timer_thread is None:
         settings = load_settings()
@@ -443,6 +480,7 @@ def generate_batch_summary():
         blocks.append(f"📅 {d}")
         blocks.append("")
         
+        # จัดเรียงใบงานตามรหัส ID เสมอ (F01, F02, F03...)
         sorted_jobs = sorted(date_groups[d], key=lambda x: x.get("id", ""))
         
         for i, job in enumerate(sorted_jobs):
@@ -681,5 +719,5 @@ def api_clear_queue():
     return jsonify({"success": True, "num_cleared": num_cleared, "message": "ล้าง Queue เรียบร้อยแล้ว"})
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port, debug=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)
+    
