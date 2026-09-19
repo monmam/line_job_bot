@@ -221,7 +221,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
     date_val = date_match.group(1).strip() if date_match else "-"
 
     # 3. เวลา (Time)
-    time_match = re.search(r'(?:【(?:时间时间|时间|เวลา)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
+    time_match = re.search(r'(?:【(?:เวลาเวลา|เวลา|时间时间|时间)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
     if not time_match:
         time_match = re.search(r'(\d{2}:\d{2})', raw_text)
     time_val = time_match.group(1).strip() if time_match else "-"
@@ -443,18 +443,11 @@ def handle_message(event):
                 )
             return
 
-# เปลี่ยนมาเช็คเฉพาะคีย์เวิร์ดหลักๆ ที่มั่นใจว่ามีแน่ๆ ในใบงาน
-    required_keywords = [
-        "【接รับ】",
-        "【ส่งส่ง】",
-        "【客户订单号】"
-    ]
-    
     # เช็คแค่ว่ามีคำว่า 【客户订单号】 หรือไม่ ถ้ามีถือว่าเป็นใบงานทันที
     is_valid_form = "【客户订单号】" in received_text
 
     if not is_valid_form:
-        return  # ถ้าไม่มีคำนี้ บอทจะเงียบและไม่ตอบอะไรกลับมา
+        return  # ถ้าไม่ใช่ใบงาน บอทจะเงียบและไม่ตอบอะไรกลับมา
         
     settings = load_settings()
     connected_groups = settings.get("line_groups", []) 
@@ -462,17 +455,7 @@ def handle_message(event):
     with ApiClient(configuration) as api_client:
         line_bot_api = MessagingApi(api_client)
         
-        if user_id:
-            try:
-            except Exception as e:
-                print(f"Push summary to personal chat error: {e}")
-
-        if source_type == 'user':
-            try:
-                )
-            except Exception as e:
-                print(f"Reply error: {e}")
-
+        # ส่งใบสรุปงานไปยังกลุ่มที่เชื่อมต่อไว้ในหน้า Settings โดยอัตโนมัติ (ทำงานแบบเงียบๆ ไม่ตอบแชทส่วนตัว)
         for group in connected_groups:
             g_id = group.get("group_id") 
             if g_id:
