@@ -154,8 +154,9 @@ CAR_PRICING_MAP = {
     "5S": {"code": "5S", "price": "380"},
     "7 SEAT": {"code": "7S", "price": "480"},
     "7S": {"code": "7S", "price": "480"},
-    "CAM/7S": {"code": "7S", "price": "480"},
-    "CAMRY/7S": {"code": "7S", "price": "480"}
+    "CAM/7S": {"code": "Cam/7S", "price": "480"},
+    "CAMRY/7S": {"code": "Cam/7S", "price": "480"},
+    "CAMRY OR 7SEAT": {"code": "Cam/7S", "price": "480"}
 }
 
 def load_settings():
