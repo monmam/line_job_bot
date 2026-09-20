@@ -161,7 +161,7 @@ CAR_PRICING_MAP = {
 
 def load_settings():
     default_settings = {
-        "wait_seconds": 120,
+        "wait_seconds": 10,  # ปรับค่าเริ่มต้นเป็น 10 วินาที
         "line_groups": [],
         "custom_keywords": [],
         "main_roads_dict": DEFAULT_MAIN_ROADS_DICT,
@@ -176,7 +176,7 @@ def load_settings():
             try:
                 data = json.load(f)
                 if "wait_seconds" not in data:
-                    data["wait_seconds"] = 120
+                    data["wait_seconds"] = 10
                 if "line_groups" not in data:
                     data["line_groups"] = []
                 if "custom_keywords" not in data:
@@ -198,7 +198,7 @@ def save_settings(data):
     if "waiting_time" in data:
         try:
             val = float(data["waiting_time"])
-            current["wait_seconds"] = int(val if val >= 30 else val * 60)
+            current["wait_seconds"] = int(val if val >= 5 else val * 60)
         except:
             pass
             
@@ -311,13 +311,9 @@ def parse_location_rule_based(raw_location):
     return cleaned_no_soi if cleaned_no_soi else cleaned
 
 def parse_job_line(line_text):
-    # ป้องกันเคสที่ชื่อสถานที่/โรงแรมมีเครื่องหมาย - อยู่ข้างใน (เช่น Manhattan Hotel Bangkok-สุขุมวิท หรืออื่นๆ)
-    # ให้มองหาเครื่องหมาย - ตัวสุดท้ายของบรรทัดเส้นทาง หรือเช็คเครื่องหมาย - ที่คั่นระหว่างจุดรับ-จุดส่งหลัก
     parts = line_text.split('-')
     
-    # ถ้ามีมากกว่า 2 ส่วน (แสดงว่ามีเครื่องหมาย - เกินมาในชื่อสถานที่ เช่น Manhattan Hotel Bangkok-สุขุมวิท)
     if len(parts) > 2:
-        # สมมติว่ารูปแบบคือ [จุดรับ] - [จุดส่ง] แต่จุดรับดันมีขีดคั่น ให้รวมตัวแรกกับตัวกลางเข้าด้วยกันเป็นจุดรับ
         pickup_raw = "-".join(parts[:-1]).strip()
         dropoff_raw = parts[-1].strip()
     elif len(parts) == 2:
@@ -353,12 +349,9 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if flight_match:
         flight_val = flight_match.group(1).strip()
 
-    # ดึงค่าจากแท็ก 【接รับ】 และ 【ส่ง】 โดยตรง 100% ตามรูปแบบในรูปภาพ
     pickup_raw = "-"
     dropoff_raw = "-"
 
-    pickup_raw_match = re.search(r'【(?:接รับ|接|รับ)?[】\s]*(.+)', raw_text) # หาบรรทัดรับ
-    # หรือใช้แบบเจาะจงแท็ก:
     pickup_tag = re.search(r'【接รับ】\s*(.+)', raw_text)
     if pickup_tag:
         pickup_raw = pickup_tag.group(1).strip()
@@ -367,11 +360,9 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if dropoff_tag:
         dropoff_raw = dropoff_tag.group(1).strip()
 
-    # แปลงชื่อสถานที่
     pickup_mapped = parse_location_rule_based(pickup_raw)
     dropoff_mapped = parse_location_rule_based(dropoff_raw)
 
-    # จัดการเรื่องขนาดรถและราคา
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if car_raw_match:
         car_raw = car_raw_match.group(1).strip().upper()
@@ -391,7 +382,6 @@ def parse_job_text(raw_text, fallback_id="F01"):
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
     order_val = order_match.group(1).strip() if order_match else "-"
 
-    # เงื่อนไขไอคอน: ถ้าตำแหน่งที่ 2 (จุดส่ง) เป็น แอร์ดอน หรือ แอร์สุ ให้ใช้ 🔥 ที่เหลือใช้ 🥶
     if dropoff_mapped in ["แอร์ดอน", "แอร์สุ"]:
         icon_symbol = "🔥"
     else:
@@ -419,7 +409,6 @@ def add_job_to_queue(text, sender_id=None):
 
     now_str = datetime.datetime.now().strftime("%H:%M:%S")
     
-    # คำนวณรหัสใบงานให้อัตโนมัติตามลำดับในคิวปัจจุบัน เพื่อป้องกัน F ชนกัน
     next_seq = len(job_queue) + len(latest_jobs) + 1
     fallback_id = f"F{next_seq:02d}"
     
@@ -448,11 +437,11 @@ def add_job_to_queue(text, sender_id=None):
         last_sender_id = sender_id
 
     latest_jobs.insert(0, job_item)
-    latest_jobs = latest_jobs[:50] # ขยายประวัติเก็บไว้รองรับหลายใบ
+    latest_jobs = latest_jobs[:50]
 
     if len(job_queue) == 1 and timer_thread is None:
         settings = load_settings()
-        wait_seconds = int(settings.get("wait_seconds", 120))
+        wait_seconds = int(settings.get("wait_seconds", 10))
         timer_start_time = time.time()
         timer_thread = threading.Timer(wait_seconds, process_batch_jobs)
         timer_thread.start()
@@ -483,7 +472,6 @@ def generate_batch_summary():
         blocks.append(f"📅 {d}")
         blocks.append("")
         
-        # จัดเรียงใบงานตามรหัส ID เสมอ (F01, F02, F03...)
         sorted_jobs = sorted(date_groups[d], key=lambda x: x.get("id", ""))
         
         for i, job in enumerate(sorted_jobs):
@@ -586,7 +574,7 @@ def index():
 @app.route("/api/status", methods=["GET"])
 def api_status():
     settings = load_settings()
-    wait_seconds = int(settings.get("wait_seconds", 120))
+    wait_seconds = int(settings.get("wait_seconds", 10))
     
     time_left = 0
     if timer_start_time:
@@ -723,4 +711,3 @@ def api_clear_queue():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=True)
-    
