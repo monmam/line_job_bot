@@ -32,6 +32,21 @@ class StorageError(Exception):
     pass
 
 
+def config_problem():
+    """เช็คว่าใส่ค่าใน Render ถูกช่องไหม คืนข้อความปัญหา หรือ "" ถ้าโอเค"""
+    if not SUPABASE_URL and not SUPABASE_KEY:
+        return ""
+    if not SUPABASE_URL.startswith("https://"):
+        return ("SUPABASE_URL ต้องเป็นลิงก์แบบ https://xxxx.supabase.co "
+                "(ตอนนี้ใส่ค่าอื่นไว้ เช่น คีย์)")
+    if SUPABASE_KEY.startswith("sb_publishable_"):
+        return ("SUPABASE_SERVICE_ROLE_KEY ใส่ publishable key ไว้ ต้องใช้ secret key "
+                "(ขึ้นต้นด้วย sb_secret_) หรือ service_role key")
+    if not SUPABASE_KEY:
+        return "ยังไม่ได้ใส่ SUPABASE_SERVICE_ROLE_KEY"
+    return ""
+
+
 def using_supabase():
     return bool(SUPABASE_URL and SUPABASE_KEY)
 
@@ -39,9 +54,12 @@ def using_supabase():
 def _headers(extra=None):
     h = {
         "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type": "application/json",
     }
+    # คีย์แบบเก่า (service_role) เป็น JWT ขึ้นต้นด้วย eyJ ต้องส่ง Authorization ด้วย
+    # คีย์แบบใหม่ (sb_secret_...) ส่งแค่ apikey ก็พอ
+    if SUPABASE_KEY.startswith("eyJ"):
+        h["Authorization"] = f"Bearer {SUPABASE_KEY}"
     if extra:
         h.update(extra)
     return h
@@ -83,6 +101,8 @@ def _read_legacy_settings():
 def get(key, default=None):
     """อ่านค่า ถ้าไม่มีข้อมูลคืน default / ถ้าเชื่อมต่อไม่ได้จะ raise StorageError"""
     if using_supabase():
+        if config_problem():
+            raise StorageError(config_problem())
         try:
             r = requests.get(
                 _endpoint(),
@@ -113,6 +133,8 @@ def get(key, default=None):
 def set(key, value):
     """บันทึกค่า (ถ้ามีอยู่แล้วจะเขียนทับ) / ถ้าบันทึกไม่ได้จะ raise StorageError"""
     if using_supabase():
+        if config_problem():
+            raise StorageError(config_problem())
         try:
             r = requests.post(
                 _endpoint(),
@@ -136,6 +158,9 @@ def set(key, value):
 
 def health():
     """เช็คว่าที่เก็บข้อมูลใช้งานได้ไหม คืน (ok, ข้อความ)"""
+    problem = config_problem()
+    if problem:
+        return False, problem
     if not using_supabase():
         return False, "ยังไม่ได้ตั้งค่า Supabase (ใช้ไฟล์ในเครื่อง ข้อมูลจะหายเมื่อเซิร์ฟเวอร์รีสตาร์ท)"
     try:
