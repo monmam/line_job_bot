@@ -3,6 +3,16 @@ import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 
+CREDENTIAL_PATHS = [
+    "/etc/secrets/credentials.json",
+    "credentials.json"
+]
+
+
+def has_credentials():
+    return any(os.path.exists(p) for p in CREDENTIAL_PATHS)
+
+
 def get_sheet_client():
     """เชื่อมต่อ Google Sheets ด้วย Service Account"""
     scopes = [
@@ -11,10 +21,7 @@ def get_sheet_client():
     ]
     
     # กำหนดเส้นทางไฟล์: เช็คว่ามีในโฟลเดอร์ลับของ Render ไหม ถ้าไม่มีให้ใช้ชื่อไฟล์ปกติ
-    possible_paths = [
-        "/etc/secrets/credentials.json",
-        "credentials.json"
-    ]
+    possible_paths = CREDENTIAL_PATHS
     
     cred_file = None
     for path in possible_paths:

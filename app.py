@@ -1,25 +1,30 @@
 import os
 import re
 import json
+import copy
 import time
 import threading
 import datetime
-from flask import Flask, request, abort, render_template, jsonify, redirect, url_for
-from linebot.v3.messaging import TextMessage, ReplyMessageRequest
+
+import requests
+from flask import Flask, request, abort, render_template, jsonify
 from dotenv import load_dotenv
 
 # Import LINE SDK (v3)
 from linebot.v3 import WebhookHandler
 from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
-    Configuration, ApiClient, MessagingApi, PushMessageRequest, TextMessage
+    Configuration, ApiClient, MessagingApi, PushMessageRequest, ReplyMessageRequest, TextMessage
 )
 from linebot.v3.webhooks import MessageEvent, TextMessageContent
 
-# Import local modules (เฉพาะส่วน Google Sheet)
-from google_sheet import save_to_google_sheets, get_sheet_client, delete_row_from_google_sheets
-
 load_dotenv()
+
+# โหลด .env ก่อน แล้วค่อย import โมดูลที่อ่านค่า env
+import storage
+from google_sheet import (
+    save_to_google_sheets, get_sheet_client, delete_row_from_google_sheets, has_credentials
+)
 
 app = Flask(__name__)
 
@@ -30,12 +35,22 @@ GOOGLE_SPREADSHEET_ID = os.getenv("GOOGLE_SPREADSHEET_ID", "")
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 
-# Global State
-job_queue = []          
-timer_thread = None     
-timer_start_time = None 
-latest_jobs = []        
-last_sender_id = None   
+# เวลาไทย (เซิร์ฟเวอร์ Render ใช้เวลา UTC)
+TH_TZ = datetime.timezone(datetime.timedelta(hours=7))
+
+
+def now_th():
+    return datetime.datetime.now(TH_TZ)
+
+
+# Global State (โหลดจาก Supabase ตอนเปิดเครื่อง และบันทึกกลับทุกครั้งที่เปลี่ยน)
+state_lock = threading.RLock()
+job_queue = []
+timer_thread = None
+timer_start_time = None
+latest_jobs = []
+last_sender_id = None
+MAX_HISTORY = 100
 
 # ค่าเริ่มต้นพจนานุกรมรายชื่อถนนหลัก (อังกฤษ = ไทย)
 DEFAULT_MAIN_ROADS_DICT = {
@@ -159,161 +174,234 @@ CAR_PRICING_MAP = {
     "CAMRY OR 7SEAT": {"code": "Cam/7S", "price": "480"}
 }
 
-def load_settings():
-    default_settings = {
-        "wait_seconds": 10,  # ปรับค่าเริ่มต้นเป็น 10 วินาที
-        "line_groups": [],
-        "custom_keywords": [],
-        "main_roads_dict": DEFAULT_MAIN_ROADS_DICT,
-        "major_areas_dict": DEFAULT_MAJOR_AREAS_DICT,
-        "custom_locations": {
-            "metropole": "เพชรบุรีตัดใหม่",
-            "c u inn": "จตุจักร"
-        }
-    }
-    if os.path.exists("settings.json"):
-        with open("settings.json", "r", encoding="utf-8") as f:
-            try:
-                data = json.load(f)
-                if "wait_seconds" not in data:
-                    data["wait_seconds"] = 10
-                if "line_groups" not in data:
-                    data["line_groups"] = []
-                if "custom_keywords" not in data:
-                    data["custom_keywords"] = []
-                if "main_roads_dict" not in data:
-                    data["main_roads_dict"] = DEFAULT_MAIN_ROADS_DICT
-                if "major_areas_dict" not in data:
-                    data["major_areas_dict"] = DEFAULT_MAJOR_AREAS_DICT
-                if "custom_locations" not in data:
-                    data["custom_locations"] = default_settings["custom_locations"]
-                return data
-            except:
-                pass
-    return default_settings
+
+# ====================== การตั้งค่า (เก็บใน Supabase) ======================
+_settings_cache = None
+_settings_lock = threading.RLock()
+_settings_retry_at = 0
+_settings_error = ""
+
+
+def _with_defaults(data):
+    data = dict(data or {})
+    data.setdefault("wait_seconds", 10)
+    data.setdefault("line_groups", [])
+    data.setdefault("custom_keywords", [])
+    data.setdefault("main_roads_dict", copy.deepcopy(DEFAULT_MAIN_ROADS_DICT))
+    data.setdefault("major_areas_dict", copy.deepcopy(DEFAULT_MAJOR_AREAS_DICT))
+    data.setdefault("custom_locations", {"metropole": "เพชรบุรีตัดใหม่", "c u inn": "จตุจักร"})
+    data.pop("waiting_time", None)
+    try:
+        data["wait_seconds"] = int(data["wait_seconds"])
+    except Exception:
+        data["wait_seconds"] = 10
+    return data
+
+
+def load_settings(force=False):
+    """อ่านการตั้งค่า (เก็บไว้ในหน่วยความจำ ไม่ต้องดึงจาก Supabase ทุกครั้ง)"""
+    global _settings_cache, _settings_retry_at, _settings_error
+    with _settings_lock:
+        if _settings_cache is not None and not force:
+            return _settings_cache
+        if not force and time.time() < _settings_retry_at:
+            return _with_defaults({})
+        try:
+            data = storage.get("settings")
+            if data is None:
+                # ครั้งแรก: ย้ายค่าจาก settings.json เดิม (ถ้ามี) ขึ้น Supabase
+                data = _with_defaults(storage._read_legacy_settings() or {})
+                try:
+                    storage.set("settings", data)
+                except storage.StorageError as e:
+                    print(f"⚠️ บันทึกการตั้งค่าเริ่มต้นไม่สำเร็จ: {e}")
+            _settings_cache = _with_defaults(data)
+            _settings_error = ""
+            return _settings_cache
+        except storage.StorageError as e:
+            _settings_error = str(e)
+            _settings_retry_at = time.time() + 30
+            print(f"❌ โหลดการตั้งค่าไม่สำเร็จ (ใช้ค่าเริ่มต้นชั่วคราว): {e}")
+            return _with_defaults({})
+
 
 def save_settings(data):
-    current = load_settings()
-                
-    if "waiting_time" in data:
+    """บันทึกการตั้งค่า คืน (สำเร็จไหม, ข้อความ)"""
+    global _settings_cache
+    with _settings_lock:
+        current = copy.deepcopy(load_settings(force=True))
+        if _settings_error:
+            return False, f"บันทึกไม่สำเร็จ: เชื่อมต่อที่เก็บข้อมูลไม่ได้ ({_settings_error})"
+
+        if "waiting_time" in data:
+            try:
+                val = float(data["waiting_time"])
+                current["wait_seconds"] = int(val if val >= 5 else val * 60)
+            except Exception:
+                pass
+
+        for key in ("line_groups", "custom_keywords", "main_roads_dict",
+                    "major_areas_dict", "custom_locations"):
+            if key in data:
+                current[key] = data[key]
+
         try:
-            val = float(data["waiting_time"])
-            current["wait_seconds"] = int(val if val >= 5 else val * 60)
-        except:
-            pass
-            
-    if "line_groups" in data:
-        current["line_groups"] = data["line_groups"]
+            storage.set("settings", current)
+        except storage.StorageError as e:
+            return False, f"บันทึกไม่สำเร็จ: {e}"
+        _settings_cache = current
+        return True, "บันทึกการตั้งค่าเรียบร้อยแล้ว"
 
-    if "custom_keywords" in data:
-        current["custom_keywords"] = data["custom_keywords"]
 
-    if "main_roads_dict" in data:
-        current["main_roads_dict"] = data["main_roads_dict"]
+# ====================== บันทึก/โหลด คิวใบงาน ======================
+def persist_state():
+    """บันทึกคิว + ประวัติใบงานลง Supabase (กันข้อมูลหายตอนเซิร์ฟเวอร์หลับ)"""
+    with state_lock:
+        snapshot = {
+            "job_queue": list(job_queue),
+            "latest_jobs": list(latest_jobs),
+            "last_sender_id": last_sender_id,
+            "timer_start_time": timer_start_time,
+        }
+    try:
+        storage.set("job_state", snapshot)
+    except storage.StorageError as e:
+        print(f"⚠️ บันทึกคิวใบงานไม่สำเร็จ: {e}")
 
-    if "major_areas_dict" in data:
-        current["major_areas_dict"] = data["major_areas_dict"]
 
-    if "custom_locations" in data:
-        current["custom_locations"] = data["custom_locations"]
-    
-    with open("settings.json", "w", encoding="utf-8") as f:
-        json.dump(current, f, ensure_ascii=False, indent=2)
+def restore_state():
+    """โหลดคิวที่ค้างอยู่กลับมา และเริ่มนับเวลาต่อ"""
+    global job_queue, latest_jobs, last_sender_id, timer_start_time
+    try:
+        snap = storage.get("job_state")
+    except storage.StorageError as e:
+        print(f"⚠️ โหลดคิวใบงานไม่สำเร็จ: {e}")
+        return
+    if not snap:
+        return
+    with state_lock:
+        job_queue = snap.get("job_queue") or []
+        latest_jobs = snap.get("latest_jobs") or []
+        last_sender_id = snap.get("last_sender_id")
+        if job_queue:
+            wait_seconds = int(load_settings().get("wait_seconds", 10))
+            started = snap.get("timer_start_time") or time.time()
+            remaining = max(5, wait_seconds - (time.time() - started))
+            _start_timer(remaining, started)
+            print(f"♻️ กู้คืนคิวค้าง {len(job_queue)} ใบ จะส่งในอีก {int(remaining)} วินาที")
+
+
+def _start_timer(seconds, started_at=None):
+    global timer_thread, timer_start_time
+    timer_start_time = started_at or time.time()
+    timer_thread = threading.Timer(seconds, process_batch_jobs)
+    timer_thread.daemon = True
+    timer_thread.start()
+
+
+# ====================== แปลงชื่อสถานที่ ======================
+def _contains(text_lower, word):
+    """เช็คคำ: ภาษาอังกฤษต้องเป็นคำเต็ม (กัน 'Chan' ไปตรงกับ 'Chang Klan'), ภาษาไทยเช็คแบบมีอยู่ในข้อความ"""
+    w = str(word).strip().lower()
+    if not w:
+        return False
+    if re.search(r"[a-z0-9]", w):
+        return re.search(r"(?<![a-z0-9])" + re.escape(w) + r"(?![a-z0-9])", text_lower) is not None
+    return w in text_lower
+
+
+def _dict_candidates(d):
+    """แปลงพจนานุกรม (dict หรือ list) เป็นรายการ (คำที่ใช้ค้นหา, ผลลัพธ์ภาษาไทย)"""
+    out = []
+    if isinstance(d, dict):
+        for eng, th in d.items():
+            eng_items = eng if isinstance(eng, list) else [eng]
+            th_items = th if isinstance(th, list) else [th]
+            th_items = [t for t in th_items if isinstance(t, str) and t.strip()]
+            eng_items = [e for e in eng_items if isinstance(e, str) and e.strip()]
+            result = th_items[0].strip() if th_items else (eng_items[0].strip() if eng_items else "")
+            if not result:
+                continue
+            for word in eng_items + th_items:
+                out.append((word, result))
+    elif isinstance(d, list):
+        for item in d:
+            if not isinstance(item, dict):
+                continue
+            key = str(item.get("key", "")).strip()
+            aliases = item.get("aliases", [])
+            alias_list = aliases if isinstance(aliases, list) else [aliases]
+            if not key:
+                continue
+            for word in [key] + [a for a in alias_list if isinstance(a, str)]:
+                out.append((word, key))
+    # คำยาวก่อน เพื่อให้ "New Petchaburi" ชนะ "Petchaburi"
+    out.sort(key=lambda x: len(str(x[0])), reverse=True)
+    return out
+
+
+def _match_dict(text_lower, d):
+    for word, result in _dict_candidates(d):
+        if _contains(text_lower, word):
+            return result
+    return ""
+
 
 def parse_location_rule_based(raw_location):
     """แปลงจุดรับ-จุดส่งด้วยกฎ และดึงพจนานุกรมล่าสุดจาก Settings"""
     if not raw_location or raw_location == "-":
         return "-"
-    
+
     cleaned = raw_location.strip()
     upper_loc = cleaned.upper()
-    
-    # ดึงค่าพจนานุกรมปัจจุบันจาก settings
+    lower_loc = cleaned.lower()
+
     settings = load_settings()
     current_main_roads = settings.get("main_roads_dict", DEFAULT_MAIN_ROADS_DICT)
     current_major_areas = settings.get("major_areas_dict", DEFAULT_MAJOR_AREAS_DICT)
     custom_keywords = settings.get("custom_keywords", [])
 
-    # 0. ตรวจสอบ Custom Keywords ที่ผู้ใช้ตั้งค่าเพิ่มเอง
+    # 0. Custom Keywords ที่ผู้ใช้ตั้งค่าเพิ่มเอง
     for item in custom_keywords:
-        kw = item.get("keyword", "").strip()
-        target = item.get("zone", "").strip()
-        if kw and kw.lower() in cleaned.lower():
+        kw = str(item.get("keyword", "")).strip()
+        target = str(item.get("zone", "")).strip()
+        if kw and kw.lower() in lower_loc:
             return target if target else cleaned
 
-    # 0.1 เพิ่มตัวดักจับกรณีเศษข้อความหลุด เช่น "ei Nuea" จาก Khlong Toei Nuea ให้ตีเป็นสุขุมวิท
+    # 0.1 เศษข้อความหลุด เช่น "ei Nuea" จาก Khlong Toei Nuea ให้ตีเป็นสุขุมวิท
     if "EI NUEA" in upper_loc or "KHLONG TOEI" in upper_loc:
         return "สุขุมวิท"
 
-    # 1. ตรวจจับสนามบินดอนเมือง (รองรับ DMK, T1-T5, Don Mueang, ดอนเมือง และคำว่าแอร์ดอนทั้งหมด)
-    if any(k in upper_loc for k in ["DMK", "DON MUEANG", "ดอนเมือง", "แอร์ดอน"]) or re.search(r'DMK\s*T[1-5]', upper_loc):
+    # 1. สนามบินดอนเมือง
+    if any(k in upper_loc for k in ["DMK", "DON MUEANG", "ดอนเมือง", "แอร์ดอน"]):
         return "แอร์ดอน"
-    
-    # 2. ตรวจจับสนามบินสุวรรณภูมิ
-    elif any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ", "สุวรรณภูมิ"]):
+
+    # 2. สนามบินสุวรรณภูมิ
+    if any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ", "สุวรรณภูมิ"]):
         return "แอร์สุ"
-        
-    # 3. ตรวจจับ Sukhumvit ตามด้วยเลขซอย ให้กลายเป็น สุขุมวิท
+
+    # 3. Sukhumvit ตามด้วยเลขซอย
     if re.search(r'\bSukhumvit\s*\d+\b', cleaned, flags=re.IGNORECASE):
         return "สุขุมวิท"
 
-    matched_th_road = ""
+    # 4. ถนนหลัก แล้วค่อย 5. ย่านสำคัญ
+    matched = _match_dict(lower_loc, current_main_roads) or _match_dict(lower_loc, current_major_areas)
+    if matched:
+        return matched
 
-    # 4. ตรวจสอบชื่อถนนหลักจาก MAIN_ROADS_DICT
-    if isinstance(current_main_roads, dict):
-        for eng_road, th_road in current_main_roads.items():
-            eng_items = eng_road if isinstance(eng_road, list) else [eng_road]
-            th_items = th_road if isinstance(th_road, list) else [th_road]
-            
-            matched_eng = any(e and str(e).lower() in cleaned.lower() for e in eng_items if isinstance(e, str))
-            matched_th = any(t and str(t) in cleaned for t in th_items if isinstance(t, str))
-            
-            if matched_eng or matched_th:
-                matched_th_road = str(th_items[0]).strip() if th_items else str(eng_items[0]).strip()
-                break
-    elif isinstance(current_main_roads, list):
-        for item in current_main_roads:
-            key = item.get("key", "")
-            aliases = item.get("aliases", [])
-            alias_list = aliases if isinstance(aliases, list) else [aliases]
-            if (key and str(key).lower() in cleaned.lower()) or any(a and str(a).lower() in cleaned.lower() for a in alias_list if isinstance(a, str)):
-                matched_th_road = str(key).strip()
-                break
-
-    # 5. หากไม่เจอ ลองเช็คใน MAJOR_AREAS_DICT
-    if not matched_th_road:
-        if isinstance(current_major_areas, dict):
-            for area_eng, area_th in current_major_areas.items():
-                eng_items = area_eng if isinstance(area_eng, list) else [area_eng]
-                th_items = area_th if isinstance(area_th, list) else [area_th]
-                
-                matched_eng = any(e and str(e).lower() in cleaned.lower() for e in eng_items if isinstance(e, str))
-                matched_th = any(t and str(t) in cleaned for t in th_items if isinstance(t, str))
-                
-                if matched_eng or matched_th:
-                    matched_th_road = str(th_items[0]).strip() if th_items else str(eng_items[0]).strip()
-                    break
-        elif isinstance(current_major_areas, list):
-            for item in current_major_areas:
-                key = item.get("key", "")
-                aliases = item.get("aliases", [])
-                alias_list = aliases if isinstance(aliases, list) else [aliases]
-                if (key and str(key).lower() in cleaned.lower()) or any(a and str(a).lower() in cleaned.lower() for a in alias_list if isinstance(a, str)):
-                    matched_th_road = str(key).strip()
-                    break
-
-    if matched_th_road:
-        return matched_th_road
-
-    # หากไม่ตรง ให้ตัดคำว่า "ซอย [ตัวเลข]" ออก
+    # ไม่ตรงอะไรเลย ตัด "ซอย [ตัวเลข]" ออก
     cleaned_no_soi = re.sub(r'(?:ซอย|soi)\s*\d+', '', cleaned, flags=re.IGNORECASE).strip()
-    
     return cleaned_no_soi if cleaned_no_soi else cleaned
 
+
 def parse_job_line(line_text):
+    # ป้องกันเคสที่ชื่อสถานที่/โรงแรมมีเครื่องหมาย - อยู่ข้างใน (เช่น Manhattan Hotel Bangkok-สุขุมวิท หรืออื่นๆ)
+    # ให้มองหาเครื่องหมาย - ตัวสุดท้ายของบรรทัดเส้นทาง หรือเช็คเครื่องหมาย - ที่คั่นระหว่างจุดรับ-จุดส่งหลัก
     parts = line_text.split('-')
     
+    # ถ้ามีมากกว่า 2 ส่วน (แสดงว่ามีเครื่องหมาย - เกินมาในชื่อสถานที่ เช่น Manhattan Hotel Bangkok-สุขุมวิท)
     if len(parts) > 2:
+        # สมมติว่ารูปแบบคือ [จุดรับ] - [จุดส่ง] แต่จุดรับดันมีขีดคั่น ให้รวมตัวแรกกับตัวกลางเข้าด้วยกันเป็นจุดรับ
         pickup_raw = "-".join(parts[:-1]).strip()
         dropoff_raw = parts[-1].strip()
     elif len(parts) == 2:
@@ -349,6 +437,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if flight_match:
         flight_val = flight_match.group(1).strip()
 
+    # ดึงค่าจากแท็ก 【接รับ】 และ 【ส่ง】 โดยตรง 100% ตามรูปแบบในรูปภาพ
     pickup_raw = "-"
     dropoff_raw = "-"
 
@@ -360,9 +449,11 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if dropoff_tag:
         dropoff_raw = dropoff_tag.group(1).strip()
 
+    # แปลงชื่อสถานที่
     pickup_mapped = parse_location_rule_based(pickup_raw)
     dropoff_mapped = parse_location_rule_based(dropoff_raw)
 
+    # จัดการเรื่องขนาดรถและราคา
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
     if car_raw_match:
         car_raw = car_raw_match.group(1).strip().upper()
@@ -373,7 +464,15 @@ def parse_job_text(raw_text, fallback_id="F01"):
                 car_raw = key
                 break
     
-    car_info = CAR_PRICING_MAP.get(car_raw, {"code": "5S", "price": "380"})
+    car_info = CAR_PRICING_MAP.get(car_raw)
+    if not car_info:
+        # เช่น "7 SEAT (CAMRY)" -> หาคำที่ยาวที่สุดที่อยู่ในข้อความ
+        for key in sorted(CAR_PRICING_MAP.keys(), key=len, reverse=True):
+            if key in car_raw:
+                car_info = CAR_PRICING_MAP[key]
+                break
+    if not car_info:
+        car_info = {"code": "5S", "price": "380"}
     car_code = car_info["code"]
     price_val = car_info["price"]
 
@@ -382,6 +481,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
     order_val = order_match.group(1).strip() if order_match else "-"
 
+    # เงื่อนไขไอคอน: ถ้าตำแหน่งที่ 2 (จุดส่ง) เป็น แอร์ดอน หรือ แอร์สุ ให้ใช้ 🔥 ที่เหลือใช้ 🥶
     if dropoff_mapped in ["แอร์ดอน", "แอร์สุ"]:
         icon_symbol = "🔥"
     else:
@@ -404,190 +504,224 @@ def parse_job_text(raw_text, fallback_id="F01"):
         "formatted_summary": formatted_summary
     }
 
+
+def _job_key(job):
+    order = str(job.get("order", "")).strip()
+    if order and order != "-":
+        return "order:" + order
+    return "text:" + str(job.get("text", "")).strip()
+
+
 def add_job_to_queue(text, sender_id=None):
-    global job_queue, timer_thread, timer_start_time, latest_jobs, last_sender_id
+    """เพิ่มใบงานเข้าคิว คืน (สำเร็จไหม, ข้อมูลใบงาน หรือ ข้อความ)"""
+    global latest_jobs, last_sender_id
 
-    now_str = datetime.datetime.now().strftime("%H:%M:%S")
-    
-    next_seq = len(job_queue) + len(latest_jobs) + 1
-    fallback_id = f"F{next_seq:02d}"
-    
-    parsed_info = parse_job_text(text, fallback_id=fallback_id)
+    with state_lock:
+        # รหัสใบงานตามลำดับในคิวปัจจุบัน (F01, F02, ...) กัน F ชนกัน
+        used_ids = {j.get("id") for j in job_queue}
+        seq = len(job_queue) + 1
+        while f"F{seq:02d}" in used_ids:
+            seq += 1
+        parsed_info = parse_job_text(text, fallback_id=f"F{seq:02d}")
 
-    job_item = {
-        "id": parsed_info["id"],
-        "date": parsed_info["date"] if parsed_info["date"] != "-" else datetime.datetime.now().strftime("%d/%m/%Y"),
-        "text": text,           
-        "raw_text": text,       
-        "time": parsed_info["time"] if parsed_info["time"] != "-" else now_str,
-        "pickup": parsed_info["pickup"],          
-        "pickup_display": parsed_info["pickup"],    
-        "dropoff": parsed_info["dropoff"],        
-        "dropoff_display": parsed_info["dropoff"],  
-        "flight": parsed_info["flight"],
-        "order": parsed_info["order"],
-        "car_code": parsed_info["car_code"],
-        "price": parsed_info["price"],
-        "formatted_summary": parsed_info["formatted_summary"],
-        "status": "รอส่ง"
-    }
+        now = now_th()
+        job_item = {
+            "id": parsed_info["id"],
+            "date": parsed_info["date"] if parsed_info["date"] != "-" else now.strftime("%d/%m/%Y"),
+            "text": text,
+            "raw_text": text,
+            "time": parsed_info["time"] if parsed_info["time"] != "-" else now.strftime("%H:%M:%S"),
+            "pickup": parsed_info["pickup"],
+            "pickup_display": parsed_info["pickup"],
+            "dropoff": parsed_info["dropoff"],
+            "dropoff_display": parsed_info["dropoff"],
+            "flight": parsed_info["flight"],
+            "order": parsed_info["order"],
+            "car_code": parsed_info["car_code"],
+            "price": parsed_info["price"],
+            "formatted_summary": parsed_info["formatted_summary"],
+            "received_at": now.strftime("%Y-%m-%d %H:%M:%S"),
+            "status": "รอส่ง"
+        }
 
-    job_queue.append(job_item)
-    if sender_id:
-        last_sender_id = sender_id
+        # กันใบงานซ้ำ (เช่น LINE ส่ง webhook ซ้ำ หรือกดส่งซ้ำ)
+        key = _job_key(job_item)
+        if any(_job_key(j) == key for j in job_queue):
+            return False, "พบใบงานซ้ำในคิว (Order เดียวกัน)"
 
-    latest_jobs.insert(0, job_item)
-    latest_jobs = latest_jobs[:50]
+        job_queue.append(job_item)
+        if sender_id:
+            last_sender_id = sender_id
 
-    if len(job_queue) == 1 and timer_thread is None:
-        settings = load_settings()
-        wait_seconds = int(settings.get("wait_seconds", 10))
-        timer_start_time = time.time()
-        timer_thread = threading.Timer(wait_seconds, process_batch_jobs)
-        timer_thread.start()
-        print(f"⏱️ เริ่มนับเวลาประมวลผลอีก {wait_seconds} วินาที...")
-    return True
+        latest_jobs.insert(0, job_item)
+        latest_jobs = latest_jobs[:MAX_HISTORY]
 
-def generate_batch_summary():
-    if not job_queue:
+        if len(job_queue) == 1 and timer_thread is None:
+            wait_seconds = int(load_settings().get("wait_seconds", 10))
+            _start_timer(wait_seconds)
+            print(f"⏱️ เริ่มนับเวลาประมวลผลอีก {wait_seconds} วินาที...")
+
+    persist_state()
+    return True, job_item
+
+
+def _date_sort_key(d):
+    for fmt in ("%d/%m/%Y", "%Y/%m/%d", "%d/%m/%y"):
+        try:
+            return (0, datetime.datetime.strptime(d, fmt))
+        except Exception:
+            pass
+    return (1, datetime.datetime.max)
+
+
+def _id_sort_key(job):
+    m = re.search(r'(\d+)', str(job.get("id", "")))
+    return (int(m.group(1)) if m else 10**9, str(job.get("id", "")))
+
+
+def generate_batch_summary(jobs):
+    if not jobs:
         return ""
 
     date_groups = {}
-    for job in job_queue:
-        raw_date = job.get("date", datetime.datetime.now().strftime("%d/%m/%Y"))
+    for job in jobs:
+        raw_date = str(job.get("date") or now_th().strftime("%d/%m/%Y"))
         try:
-            parsed_d = datetime.datetime.strptime(raw_date.replace('-', '/'), "%d/%m/%Y")
-            job_date = parsed_d.strftime("%d/%m/%Y")
-        except:
+            job_date = datetime.datetime.strptime(raw_date.replace('-', '/'), "%d/%m/%Y").strftime("%d/%m/%Y")
+        except Exception:
             job_date = raw_date
-
-        if job_date not in date_groups:
-            date_groups[job_date] = []
-        date_groups[job_date].append(job)
+        date_groups.setdefault(job_date, []).append(job)
 
     blocks = []
-    sorted_dates = sorted(date_groups.keys(), key=lambda x: datetime.datetime.strptime(x, "%d/%m/%Y"))
+    sorted_dates = sorted(date_groups.keys(), key=_date_sort_key)
 
     for d in sorted_dates:
         blocks.append(f"📅 {d}")
         blocks.append("")
-        
-        sorted_jobs = sorted(date_groups[d], key=lambda x: x.get("id", ""))
-        
+        sorted_jobs = sorted(date_groups[d], key=_id_sort_key)
         for i, job in enumerate(sorted_jobs):
             blocks.append(job["formatted_summary"])
             if i < len(sorted_jobs) - 1:
                 blocks.append("")
-                
         if d != sorted_dates[-1]:
             blocks.append("")
 
     return "\n".join(blocks)
 
+
 def process_batch_jobs():
+    """ส่งสรุปใบงานทั้งหมดในคิว: LINE ก่อน แล้วค่อยบันทึก Google Sheets"""
     global job_queue, timer_thread, timer_start_time, last_sender_id
 
-    if not job_queue:
+    with state_lock:
+        if timer_thread is not None and threading.current_thread() is not timer_thread:
+            timer_thread.cancel()
+        jobs = list(job_queue)
+        target_sender_id = last_sender_id
+        # เคลียร์คิวทันที ใบงานใหม่ที่เข้ามาระหว่างส่งจะเริ่มรอบใหม่ได้เลย
+        job_queue = []
+        timer_thread = None
+        timer_start_time = None
+        last_sender_id = None
+
+    if not jobs:
+        persist_state()
         return
 
-    target_sender_id = last_sender_id
-    summary_text = generate_batch_summary()
-    current_jobs = [job["text"] for job in job_queue]
-
-    if summary_text:
-        if GOOGLE_SPREADSHEET_ID:
-            try:
-                save_to_google_sheets(GOOGLE_SPREADSHEET_ID, current_jobs, job_queue)
-                print("✅ บันทึกข้อมูลลง Google Sheets สำเร็จ")
-            except Exception as e:
-                print(f"❌ บันทึก Google Sheets ล้มเหลว: {e}")
-
-        settings = load_settings()
-        groups = settings.get("line_groups", [])
-        active_groups = [g for g in groups if g.get("group_id")]
-
-        with ApiClient(configuration) as api_client:
-            line_bot_api = MessagingApi(api_client)
-            
+    try:
+        summary_text = generate_batch_summary(jobs)
+        if summary_text:
+            settings = load_settings()
+            active_groups = [g for g in settings.get("line_groups", []) if g.get("group_id")]
+            targets = []
             if target_sender_id:
-                try:
-                    push_request = PushMessageRequest(
-                        to=target_sender_id,
-                        messages=[TextMessage(text=summary_text)]
-                    )
-                    line_bot_api.push_message(push_request)
-                except Exception as e:
-                    print(f"❌ ส่งข้อความกลับหาผู้ส่ง (LINE OA) ล้มเหลว: {e}")
+                targets.append(("ผู้ส่ง (LINE OA)", target_sender_id))
+            for grp in active_groups:
+                targets.append((f"กลุ่ม {grp.get('name')}", grp.get("group_id")))
 
-            if active_groups:
-                for grp in active_groups:
+            # LINE จำกัด 5000 ตัวอักษรต่อข้อความ
+            chunks = [summary_text[i:i + 4900] for i in range(0, len(summary_text), 4900)][:5]
+            with ApiClient(configuration) as api_client:
+                line_bot_api = MessagingApi(api_client)
+                for label, to in targets:
                     try:
-                        push_request = PushMessageRequest(
-                            to=grp.get("group_id"),
-                            messages=[TextMessage(text=summary_text)]
-                        )
-                        line_bot_api.push_message(push_request)
+                        line_bot_api.push_message(PushMessageRequest(
+                            to=to, messages=[TextMessage(text=c) for c in chunks]
+                        ))
                     except Exception as e:
-                        print(f"❌ ส่งข้อความไปยังกลุ่ม LINE ({grp.get('name')}) ล้มเหลว: {e}")
+                        print(f"❌ ส่งข้อความไปยัง {label} ล้มเหลว: {e}")
 
-        for job in latest_jobs:
-            for q_job in job_queue:
-                if job.get("order") == q_job.get("order") and job.get("id") == q_job.get("id"):
+            if GOOGLE_SPREADSHEET_ID:
+                try:
+                    ok = save_to_google_sheets(GOOGLE_SPREADSHEET_ID, [j["text"] for j in jobs], jobs)
+                    print("✅ บันทึกข้อมูลลง Google Sheets สำเร็จ" if ok else "❌ บันทึก Google Sheets ล้มเหลว")
+                except Exception as e:
+                    print(f"❌ บันทึก Google Sheets ล้มเหลว: {e}")
+    except Exception as e:
+        print(f"❌ ประมวลผลคิวใบงานผิดพลาด: {e}")
+    finally:
+        sent_keys = {(_job_key(j), j.get("id")) for j in jobs}
+        with state_lock:
+            for job in latest_jobs:
+                if (_job_key(job), job.get("id")) in sent_keys:
                     job["status"] = "ส่งแล้ว"
+        persist_state()
 
-    job_queue.clear()
-    timer_thread = None
-    timer_start_time = None
-    last_sender_id = None
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
     received_text = event.message.text.strip()
     source_type = event.source.type
-    user_id = event.source.user_id if hasattr(event.source, 'user_id') else None
+    user_id = getattr(event.source, 'user_id', None)
 
-    if source_type == 'group':
-        group_id = event.source.group_id
-        
-        if received_text.lower() == "id":
-            with ApiClient(configuration) as api_client:
-                line_bot_api = MessagingApi(api_client)
-                line_bot_api.reply_message(
-                    ReplyMessageRequest(
-                        reply_token=event.reply_token,
-                        messages=[TextMessage(text=f"{group_id}")]
-                    )
+    if source_type == 'group' and received_text.lower() == "id":
+        with ApiClient(configuration) as api_client:
+            MessagingApi(api_client).reply_message(
+                ReplyMessageRequest(
+                    reply_token=event.reply_token,
+                    messages=[TextMessage(text=f"{event.source.group_id}")]
                 )
-            return
+            )
+        return
 
-    is_valid_form = "【客户订单号】" in received_text
+    if "【客户订单号】" not in received_text:
+        return
 
-    if not is_valid_form:
-        return  
-        
     add_job_to_queue(received_text, sender_id=user_id)
-    
+
+
+# ====================== หน้าเว็บ / API ======================
 @app.route("/")
 def index():
     return render_template("ui.html")
+
+
+@app.route("/health")
+def health():
+    return "OK", 200
+
 
 @app.route("/api/status", methods=["GET"])
 def api_status():
     settings = load_settings()
     wait_seconds = int(settings.get("wait_seconds", 10))
-    
-    time_left = 0
-    if timer_start_time:
-        elapsed = time.time() - timer_start_time
-        time_left = max(0, int(wait_seconds - elapsed))
+
+    with state_lock:
+        time_left = 0
+        if timer_start_time:
+            time_left = max(0, int(wait_seconds - (time.time() - timer_start_time)))
+        queue_count = len(job_queue)
+        jobs_copy = list(latest_jobs)
 
     return jsonify({
         "line_status": bool(LINE_CHANNEL_ACCESS_TOKEN and LINE_CHANNEL_SECRET),
-        "sheets_status": bool(GOOGLE_SPREADSHEET_ID and os.path.exists("credentials.json")),
-        "queue_count": len(job_queue),
+        "sheets_status": bool(GOOGLE_SPREADSHEET_ID and has_credentials()),
+        "storage_ok": not _settings_error,
+        "storage_mode": "supabase" if storage.using_supabase() else "local",
+        "queue_count": queue_count,
         "time_left_seconds": time_left,
         "max_wait_seconds": wait_seconds,
-        "latest_jobs": latest_jobs,
+        "latest_jobs": jobs_copy,
         "custom_keywords": settings.get("custom_keywords", []),
         "line_groups": settings.get("line_groups", []),
         "main_roads_dict": settings.get("main_roads_dict", DEFAULT_MAIN_ROADS_DICT),
@@ -595,33 +729,35 @@ def api_status():
         "settings": settings
     })
 
+
+_sheets_health_cache = {"at": 0, "ok": False}
+
+
 @app.route("/api/system_health", methods=["GET"])
 def api_system_health():
-    line_connected = False
-    sheets_connected = False
+    line_connected = bool(LINE_CHANNEL_ACCESS_TOKEN and LINE_CHANNEL_SECRET)
 
-    if LINE_CHANNEL_ACCESS_TOKEN and LINE_CHANNEL_SECRET:
-        try:
-            with ApiClient(configuration) as api_client:
-                line_connected = True
-        except Exception as e:
-            print(f"LINE Bot check error: {e}")
-            line_connected = False
-
-    if GOOGLE_SPREADSHEET_ID:
+    # เช็ค Google Sheets ไม่เกินทุก 5 นาที (กันโดนจำกัดการใช้งาน)
+    if GOOGLE_SPREADSHEET_ID and time.time() - _sheets_health_cache["at"] > 300:
+        ok = False
         try:
             client = get_sheet_client()
             if client:
                 client.open_by_key(GOOGLE_SPREADSHEET_ID)
-                sheets_connected = True
+                ok = True
         except Exception as e:
             print(f"Google Sheets check error: {e}")
-            sheets_connected = False
+        _sheets_health_cache.update(at=time.time(), ok=ok)
+
+    storage_ok, storage_msg = storage.health()
 
     return jsonify({
         "line_bot": line_connected,
-        "google_sheets": sheets_connected
+        "google_sheets": bool(GOOGLE_SPREADSHEET_ID) and _sheets_health_cache["ok"],
+        "storage": storage_ok,
+        "storage_message": storage_msg,
     })
+
 
 @app.route("/callback", methods=['GET', 'POST'])
 def callback():
@@ -637,77 +773,109 @@ def callback():
         abort(400)
     return 'OK'
 
+
 @app.route("/api/get_sheets_data", methods=["GET"])
 def api_get_sheets_data():
     client = get_sheet_client()
     if not client or not GOOGLE_SPREADSHEET_ID:
         return jsonify({"success": False, "message": "Google Sheets not connected"}), 400
-    
+
     try:
         spreadsheet = client.open_by_key(GOOGLE_SPREADSHEET_ID)
-        sheet_sum = spreadsheet.worksheet("SUMMARY")
-        rows = sheet_sum.get_all_records()
+        rows = spreadsheet.worksheet("SUMMARY").get_all_records()
         return jsonify({"success": True, "data": rows})
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
 
+
 @app.route("/api/add_job", methods=["POST"])
 def api_add_job():
-    data = request.get_json() or {}
-    text = data.get("text", "").strip()
-    if text:
-        success = add_job_to_queue(text)
-        return jsonify({"success": success, "message": "เพิ่มใบงานสำเร็จ" if success else "พบใบงานซ้ำ"})
-    return jsonify({"success": False, "message": "ข้อความว่างเปล่า"}), 400
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text", "")).strip()
+    if not text:
+        return jsonify({"success": False, "message": "ข้อความว่างเปล่า"}), 400
+    ok, result = add_job_to_queue(text)
+    if ok:
+        return jsonify({"success": True, "id": result["id"], "message": "เพิ่มใบงานสำเร็จ"})
+    return jsonify({"success": False, "message": result})
+
 
 @app.route("/api/save_settings", methods=["POST"])
 def api_save_settings():
-    new_settings = request.get_json() or {}
-    save_settings(new_settings)
-    return jsonify({"success": True, "message": "บันทึกการตั้งค่าเรียบร้อยแล้ว"})
+    new_settings = request.get_json(silent=True) or {}
+    ok, msg = save_settings(new_settings)
+    return jsonify({"success": ok, "message": msg}), (200 if ok else 500)
+
 
 @app.route("/api/trigger_send", methods=["POST"])
 def api_trigger_send():
-    global timer_thread
-    if timer_thread:
-        timer_thread.cancel()
     process_batch_jobs()
     return jsonify({"success": True, "message": "ส่งสรุปใบงานเรียบร้อยแล้ว"})
+
 
 @app.route('/api/delete_job', methods=['POST'])
 @app.route("/api/delete_job/<job_id>", methods=["DELETE", "POST"])
 def api_delete_job(job_id=None):
     try:
         if not job_id:
-            data = request.get_json() or {}
+            data = request.get_json(silent=True) or {}
             job_id = data.get('id')
-        
+
         if not job_id:
             return jsonify({"success": False, "message": "ไม่พบรหัสใบงานที่ต้องการลบ"}), 400
-        
+
         if not GOOGLE_SPREADSHEET_ID:
             return jsonify({"success": False, "message": "ยังไม่ได้ตั้งค่า GOOGLE_SPREADSHEET_ID"}), 400
-        
-        success = delete_row_from_google_sheets(GOOGLE_SPREADSHEET_ID, job_id)
-        
-        if success:
+
+        if delete_row_from_google_sheets(GOOGLE_SPREADSHEET_ID, job_id):
             return jsonify({"success": True, "message": f"ลบใบงาน {job_id} สำเร็จ"})
-        else:
-            return jsonify({"success": False, "message": "ไม่พบข้อมูลใน Google Sheets หรือเกิดข้อผิดพลาด"}), 404
-            
+        return jsonify({"success": False, "message": "ไม่พบข้อมูลใน Google Sheets หรือเกิดข้อผิดพลาด"}), 404
+
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+
 
 @app.route("/api/clear_queue", methods=["POST"])
 def api_clear_queue():
     global job_queue, timer_thread, timer_start_time
-    if timer_thread:
-        timer_thread.cancel()
-    num_cleared = len(job_queue)
-    job_queue.clear()
-    timer_thread = None
-    timer_start_time = None
+    with state_lock:
+        if timer_thread:
+            timer_thread.cancel()
+        num_cleared = len(job_queue)
+        cleared_keys = {_job_key(j) for j in job_queue}
+        job_queue = []
+        timer_thread = None
+        timer_start_time = None
+        for job in latest_jobs:
+            if job.get("status") == "รอส่ง" and _job_key(job) in cleared_keys:
+                job["status"] = "ยกเลิก"
+    persist_state()
     return jsonify({"success": True, "num_cleared": num_cleared, "message": "ล้าง Queue เรียบร้อยแล้ว"})
 
+
+# ====================== กันเซิร์ฟเวอร์หลับ (Render Free) ======================
+def _keep_alive_loop(url):
+    while True:
+        time.sleep(10 * 60)
+        try:
+            requests.get(url, timeout=15)
+        except Exception as e:
+            print(f"⚠️ keep-alive ping ล้มเหลว: {e}")
+
+
+def _start_background():
+    load_settings()
+    restore_state()
+    base = os.getenv("KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL")
+    if base and os.getenv("KEEP_ALIVE", "1") != "0":
+        url = base.rstrip("/") + "/health"
+        threading.Thread(target=_keep_alive_loop, args=(url,), daemon=True).start()
+        print(f"🔔 เปิด keep-alive ping ไปที่ {url} ทุก 10 นาที")
+    print(f"💾 ที่เก็บข้อมูล: {'Supabase' if storage.using_supabase() else 'ไฟล์ในเครื่อง (local_store.json)'}")
+
+
+_start_background()
+
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=True)
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 5000)), debug=False)

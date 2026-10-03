@@ -1,0 +1,5 @@
+.env
+credentials.json
+local_store.json
+__pycache__/
+venv/
