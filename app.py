@@ -415,12 +415,34 @@ def parse_job_line(line_text):
     
     return pickup_clean, dropoff_clean
 
+def _place_code(mapped):
+    """แปลงจุดรับ/จุดส่งเป็นรหัสย่อ: แอร์สุ=S, แอร์ดอน=D, อื่นๆ=BK"""
+    if not mapped or mapped == "-":
+        return "-"
+    if mapped == "แอร์สุ":
+        return "S"
+    if mapped == "แอร์ดอน":
+        return "D"
+    return "BK"
+
+
 def parse_job_text(raw_text, fallback_id="F01"):
     if not raw_text:
         return {}
 
-    id_match = re.search(r'\b(F\d+)\b', raw_text, re.IGNORECASE)
-    job_id = id_match.group(1).strip() if id_match else fallback_id
+    # รหัสใบงาน = หัวข้อบรรทัดแรกของใบงาน (เช่น F03) รหัสอื่นก็ใช้ได้หมด
+    job_id = ""
+    for ln in raw_text.splitlines():
+        ln = ln.strip()
+        if not ln:
+            continue
+        # บรรทัดแรกต้องเป็นรหัสสั้นๆ ไม่ใช่บรรทัดข้อมูลที่ขึ้นต้นด้วย 【
+        if "【" not in ln and "】" not in ln and len(ln) <= 20:
+            job_id = ln
+        break
+    if not job_id:
+        id_match = re.search(r'\b(F\d+)\b', raw_text, re.IGNORECASE)
+        job_id = id_match.group(1).strip() if id_match else fallback_id
 
     date_match = re.search(r'(?:【(?:日期วันที่|日期|วันที่)】|วันที่|Date)[:\s]*([\d/\-]+)', raw_text, re.IGNORECASE)
     date_val = date_match.group(1).strip() if date_match else "-"
@@ -487,7 +509,10 @@ def parse_job_text(raw_text, fallback_id="F01"):
     else:
         icon_symbol = "🥶"
 
-    formatted_summary = f"{job_id}({icon_symbol}){time_val}/{price_val}#{car_code}\n{pickup_mapped}-{dropoff_mapped} ✈️{flight_val}\n{order_val}"
+    # รหัสจุดรับ-จุดส่ง: S = แอร์สุ, D = แอร์ดอน, BK = สถานที่/โรงแรมในกรุงเทพ
+    route_code = f"{_place_code(pickup_mapped)}-{_place_code(dropoff_mapped)}"
+
+    formatted_summary = f"{job_id}({icon_symbol}){time_val}/{price_val}#{car_code}/{route_code}\n{pickup_mapped}-{dropoff_mapped} ✈️{flight_val}\n{order_val}"
 
     return {
         "id": job_id,
