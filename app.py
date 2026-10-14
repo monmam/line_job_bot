@@ -921,6 +921,8 @@ def handle_message(event):
     received_text = event.message.text.strip()
     source_type = event.source.type
     user_id = getattr(event.source, 'user_id', None)
+    first_line = received_text.splitlines()[0][:40] if received_text else ""
+    print(f"📩 ได้รับข้อความจาก {source_type}: {first_line!r}")
 
     if source_type == 'group' and received_text.lower() == "id":
         with ApiClient(configuration) as api_client:
@@ -938,6 +940,7 @@ def handle_message(event):
         grp = next((g for g in load_settings().get("line_groups", [])
                     if str(g.get("group_id", "")).strip() == chat_id), None)
         if not grp or not grp.get("read"):
+            print(f"🚫 ไม่อ่าน: กลุ่ม {chat_id} ยังไม่ได้เปิด 'อ่านใบงาน'")
             return
 
     plate = extract_plate(received_text)
@@ -946,9 +949,11 @@ def handle_message(event):
         return
 
     if "【客户订单号】" not in received_text and not is_voucher_format(received_text):
+        print("ℹ️ ไม่ใช่ใบงาน (ไม่มี 【客户订单号】 หรือบรรทัด ชูป้าย)")
         return
 
-    add_job_to_queue(received_text, sender_id=user_id)
+    ok, result = add_job_to_queue(received_text, sender_id=user_id)
+    print(f"✅ รับใบงาน {result['id']} เข้าคิว" if ok else f"⚠️ ไม่รับใบงาน: {result}")
 
 
 # ====================== หน้าเว็บ / API ======================
@@ -1027,10 +1032,12 @@ def callback():
 
     signature = request.headers.get('X-Line-Signature', '')
     body = request.get_data(as_text=True)
+    print("📨 ได้รับ webhook จาก LINE")
 
     try:
         handler.handle(body, signature)
     except InvalidSignatureError:
+        print("❌ ลายเซ็น LINE ไม่ถูกต้อง: เช็ค LINE_CHANNEL_SECRET ใน Render ให้ตรงกับ Channel ที่ตั้ง Webhook")
         abort(400)
     return 'OK'
 
