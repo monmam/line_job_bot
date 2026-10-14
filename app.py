@@ -50,8 +50,7 @@ def push_with_fallback(to, messages, label):
         try:
             with ApiClient(conf) as api_client:
                 MessagingApi(api_client).push_message(PushMessageRequest(to=to, messages=messages))
-            if idx:
-                print(f"✅ ส่งไปยัง {label} ด้วย {bot_name}")
+            print(f"✅ ส่งไปยัง {label} ด้วย {bot_name} สำเร็จ")
             return True
         except Exception as e:
             status = getattr(e, "status", "")
@@ -920,6 +919,7 @@ def process_batch_jobs():
             day_jobs[key] = job
         all_day_jobs = list(day_jobs.values())
 
+    print(f"🚀 เริ่มส่งสรุป: ใบงานใหม่ {len(jobs)} / รายการย่อ {len(all_day_jobs)}")
     if not jobs and not all_day_jobs:
         persist_state()
         return
