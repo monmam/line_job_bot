@@ -869,6 +869,20 @@ def generate_batch_summary(jobs):
     return "\n".join(blocks)
 
 
+def generate_compact_list(jobs):
+    """รายการย่อทั้งวัน: บรรทัดแรกของทุกใบงาน แยกตามวันที่ เรียงตามรหัสใบงาน"""
+    date_groups = {}
+    for job in jobs:
+        date_groups.setdefault(_norm_job_date(job.get("date")), []).append(job)
+    blocks = []
+    for d in sorted(date_groups, key=_date_sort_key):
+        blocks.append(f"📅 {d}")
+        for job in sorted(date_groups[d], key=_id_sort_key):
+            blocks.append(str(job["formatted_summary"]).split("\n")[0].strip())
+        blocks.append("")
+    return "\n".join(blocks).strip()
+
+
 def process_batch_jobs():
     """ส่งสรุปใบงานทั้งหมดในคิว: LINE ก่อน แล้วค่อยบันทึก Google Sheets"""
     global job_queue, timer_thread, timer_start_time, last_sender_id, pending_update_dates, last_reply
@@ -877,7 +891,12 @@ def process_batch_jobs():
         if timer_thread is not None and threading.current_thread() is not timer_thread:
             timer_thread.cancel()
         jobs = list(job_queue)
-        update_dates = list(pending_update_dates)
+        update_dates = list(pending_update_dates)  # วันที่มีการอัปเดตป้ายทะเบียน
+        list_dates = list(update_dates)            # วันที่ต้องส่งรายการย่อทั้งวัน
+        for j in jobs:
+            d = _norm_job_date(j.get("date"))
+            if d not in list_dates:
+                list_dates.append(d)
         target_sender_id = last_sender_id
         reply = last_reply
         last_reply = None
@@ -888,15 +907,22 @@ def process_batch_jobs():
         timer_start_time = None
         last_sender_id = None
 
-        # วันที่ที่มีการอัปเดตป้ายทะเบียน: ส่งใบงานทั้งหมดของวันนั้นใหม่ (ใบงานใหม่ของวันนั้นรวมอยู่แล้ว)
-        to_send = [j for j in jobs if _norm_job_date(j.get("date")) not in update_dates]
-        seen = set()
+        # ใบสรุปปกติ = ใบงานใหม่ + (ถ้ามีอัปเดตป้ายทะเบียน) ใบงานทั้งวันของวันนั้น
+        to_send = list(jobs)
+        seen = {_job_key(j) for j in jobs}
+        day_jobs = {}
         for job in latest_jobs:  # ใหม่สุดก่อน ใบงานซ้ำเอาอันล่าสุด
-            key = _job_key(job)
-            if (_norm_job_date(job.get("date")) in update_dates
-                    and job.get("status") != "ยกเลิก" and key not in seen):
-                seen.add(key)
+            d = _norm_job_date(job.get("date"))
+            if d not in list_dates or job.get("status") == "ยกเลิก":
+                continue
+            key = (d, _job_key(job))
+            if key in day_jobs:
+                continue
+            day_jobs[key] = job
+            if d in update_dates and _job_key(job) not in seen:
+                seen.add(_job_key(job))
                 to_send.append(job)
+        all_day_jobs = list(day_jobs.values())
 
     if not jobs and not to_send:
         persist_state()
@@ -915,7 +941,11 @@ def process_batch_jobs():
                 targets.append((f"กลุ่ม {grp.get('name')}", grp.get("group_id")))
 
             # LINE จำกัด 5000 ตัวอักษรต่อข้อความ
-            chunks = [summary_text[i:i + 4900] for i in range(0, len(summary_text), 4900)][:5]
+            chunks = [summary_text[i:i + 4900] for i in range(0, len(summary_text), 4900)][:4]
+            # ข้อความเพิ่มเติม: รายการย่อของใบงานทั้งวัน (เฉพาะบรรทัดแรกของแต่ละใบงาน)
+            list_text = generate_compact_list(all_day_jobs)
+            if list_text:
+                chunks.append(list_text[:4900])
             for label, to in targets:
                 messages = [TextMessage(text=c) for c in chunks]
                 # แชทที่ส่งใบงานมา: ตอบด้วย reply ก่อน (ฟรี) ถ้าไม่ได้ค่อยใช้ push
