@@ -35,6 +35,30 @@ GOOGLE_SPREADSHEET_ID = os.getenv("GOOGLE_SPREADSHEET_ID", "")
 handler = WebhookHandler(LINE_CHANNEL_SECRET)
 configuration = Configuration(access_token=LINE_CHANNEL_ACCESS_TOKEN)
 
+# บอทสำรอง (ส่งอย่างเดียว) ใช้เมื่อบอทหลักส่ง push ไม่ได้ เช่น โควต้ารายเดือนเต็ม
+# ใส่ใน Render: LINE_BACKUP_TOKENS=tokenบอท2,tokenบอท3
+BACKUP_CONFIGURATIONS = [
+    Configuration(access_token=t.strip())
+    for t in os.getenv("LINE_BACKUP_TOKENS", "").split(",") if t.strip()
+]
+
+
+def push_with_fallback(to, messages, label):
+    """ส่ง push ด้วยบอทหลัก ถ้าไม่ได้ (เช่น โควต้าเต็ม / บอทไม่อยู่ในกลุ่ม) ไล่ใช้บอทสำรองทีละตัว"""
+    for idx, conf in enumerate([configuration] + BACKUP_CONFIGURATIONS):
+        bot_name = "บอทหลัก" if idx == 0 else f"บอทสำรอง {idx}"
+        try:
+            with ApiClient(conf) as api_client:
+                MessagingApi(api_client).push_message(PushMessageRequest(to=to, messages=messages))
+            if idx:
+                print(f"✅ ส่งไปยัง {label} ด้วย {bot_name}")
+            return True
+        except Exception as e:
+            status = getattr(e, "status", "")
+            body = str(getattr(e, "body", "") or e)[:200]
+            print(f"❌ ส่งไปยัง {label} ด้วย {bot_name} ล้มเหลว ({status}): {body}")
+    return False
+
 # เวลาไทย (เซิร์ฟเวอร์ Render ใช้เวลา UTC)
 TH_TZ = datetime.timezone(datetime.timedelta(hours=7))
 
@@ -50,6 +74,7 @@ timer_thread = None
 timer_start_time = None
 latest_jobs = []
 last_sender_id = None
+last_reply = None  # {"token", "chat_id"} reply token ล่าสุด ใช้ตอบกลับแชทนั้นฟรี (ไม่นับโควต้า push)
 pending_update_dates = []  # วันที่ที่มีการอัปเดตป้ายทะเบียน รอส่งใบสรุปของวันนั้นใหม่
 MAX_HISTORY = 100
 
@@ -846,7 +871,7 @@ def generate_batch_summary(jobs):
 
 def process_batch_jobs():
     """ส่งสรุปใบงานทั้งหมดในคิว: LINE ก่อน แล้วค่อยบันทึก Google Sheets"""
-    global job_queue, timer_thread, timer_start_time, last_sender_id, pending_update_dates
+    global job_queue, timer_thread, timer_start_time, last_sender_id, pending_update_dates, last_reply
 
     with state_lock:
         if timer_thread is not None and threading.current_thread() is not timer_thread:
@@ -854,6 +879,8 @@ def process_batch_jobs():
         jobs = list(job_queue)
         update_dates = list(pending_update_dates)
         target_sender_id = last_sender_id
+        reply = last_reply
+        last_reply = None
         # เคลียร์คิวทันที ใบงานใหม่ที่เข้ามาระหว่างส่งจะเริ่มรอบใหม่ได้เลย
         job_queue = []
         pending_update_dates = []
@@ -889,15 +916,19 @@ def process_batch_jobs():
 
             # LINE จำกัด 5000 ตัวอักษรต่อข้อความ
             chunks = [summary_text[i:i + 4900] for i in range(0, len(summary_text), 4900)][:5]
-            with ApiClient(configuration) as api_client:
-                line_bot_api = MessagingApi(api_client)
-                for label, to in targets:
+            for label, to in targets:
+                messages = [TextMessage(text=c) for c in chunks]
+                # แชทที่ส่งใบงานมา: ตอบด้วย reply ก่อน (ฟรี) ถ้าไม่ได้ค่อยใช้ push
+                if reply and reply["chat_id"] == to:
+                    token, reply = reply["token"], None
                     try:
-                        line_bot_api.push_message(PushMessageRequest(
-                            to=to, messages=[TextMessage(text=c) for c in chunks]
-                        ))
+                        with ApiClient(configuration) as api_client:
+                            MessagingApi(api_client).reply_message(
+                                ReplyMessageRequest(reply_token=token, messages=messages))
+                        continue
                     except Exception as e:
-                        print(f"❌ ส่งข้อความไปยัง {label} ล้มเหลว: {e}")
+                        print(f"⚠️ ตอบกลับ {label} ด้วย reply ไม่ได้ ลองใช้ push แทน: {e}")
+                push_with_fallback(to, messages, label)
 
             if GOOGLE_SPREADSHEET_ID and jobs:
                 try:
@@ -943,9 +974,14 @@ def handle_message(event):
             print(f"🚫 ไม่อ่าน: กลุ่ม {chat_id} ยังไม่ได้เปิด 'อ่านใบงาน'")
             return
 
+    chat_id = (getattr(event.source, 'group_id', None) or getattr(event.source, 'room_id', None)
+               or user_id)
+
     plate = extract_plate(received_text)
     if plate:
-        update_plate(received_text, plate, sender_id=user_id)
+        ok, _ = update_plate(received_text, plate, sender_id=user_id)
+        if ok:
+            _remember_reply(event.reply_token, chat_id)
         return
 
     if "【客户订单号】" not in received_text and not is_voucher_format(received_text):
@@ -954,6 +990,16 @@ def handle_message(event):
 
     ok, result = add_job_to_queue(received_text, sender_id=user_id)
     print(f"✅ รับใบงาน {result['id']} เข้าคิว" if ok else f"⚠️ ไม่รับใบงาน: {result}")
+    if ok:
+        _remember_reply(event.reply_token, chat_id)
+
+
+def _remember_reply(token, chat_id):
+    """เก็บ reply token ของข้อความล่าสุด ไว้ตอบใบสรุปกลับแชทนั้นโดยไม่เสียโควต้า"""
+    global last_reply
+    if token and chat_id:
+        with state_lock:
+            last_reply = {"token": token, "chat_id": chat_id}
 
 
 # ====================== หน้าเว็บ / API ======================
@@ -1141,6 +1187,7 @@ def _start_background():
         url = base.rstrip("/") + "/health"
         threading.Thread(target=_keep_alive_loop, args=(url,), daemon=True).start()
         print(f"🔔 เปิด keep-alive ping ไปที่ {url} ทุก 10 นาที")
+    print(f"🤖 บอทสำรองสำหรับส่งข้อความ: {len(BACKUP_CONFIGURATIONS)} ตัว")
     print(f"💾 ที่เก็บข้อมูล: {'Supabase' if storage.using_supabase() else 'ไฟล์ในเครื่อง (local_store.json)'}")
 
 
