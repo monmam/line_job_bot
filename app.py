@@ -50,6 +50,7 @@ timer_thread = None
 timer_start_time = None
 latest_jobs = []
 last_sender_id = None
+pending_update_dates = []  # วันที่ที่มีการอัปเดตป้ายทะเบียน รอส่งใบสรุปของวันนั้นใหม่
 MAX_HISTORY = 100
 
 # ค่าเริ่มต้นพจนานุกรมรายชื่อถนนหลัก (อังกฤษ = ไทย)
@@ -171,8 +172,30 @@ CAR_PRICING_MAP = {
     "7S": {"code": "7S", "price": "480"},
     "CAM/7S": {"code": "Cam/7S", "price": "480"},
     "CAMRY/7S": {"code": "Cam/7S", "price": "480"},
-    "CAMRY OR 7SEAT": {"code": "Cam/7S", "price": "480"}
+    "CAMRY OR 7SEAT": {"code": "Cam/7S", "price": "480"},
+    "PREMIUM EV": {"code": "EV-SUV", "price": "450"},
+    "EV-SUV": {"code": "EV-SUV", "price": "450"},
+    "EV SUV": {"code": "EV-SUV", "price": "450"},
+    "PREMIUM CAR": {"code": "Cam", "price": "480"},
+    "CAMRY": {"code": "Cam", "price": "480"},
+    "CAM": {"code": "Cam", "price": "480"},
+    "MPV": {"code": "7S", "price": "480"},
+    "EV": {"code": "EV", "price": "380"},
 }
+
+# โรงแรม/สถานที่ที่ใบงานไม่มีที่อยู่ให้ (ชื่อตัวเล็ก = ผลลัพธ์)
+BUILTIN_PLACES = {
+    "the quarter chao phraya": "เจริญนคร",
+}
+
+
+def match_car(text):
+    """หาขนาดรถจากข้อความ (คำยาวก่อน เช่น PREMIUM EV ชนะ EV) คืน dict หรือ None"""
+    upper = str(text or "").upper()
+    for key in sorted(CAR_PRICING_MAP.keys(), key=len, reverse=True):
+        if re.search(r"(?<![A-Z0-9])" + re.escape(key) + r"(?![A-Z0-9])", upper):
+            return CAR_PRICING_MAP[key]
+    return None
 
 
 # ====================== การตั้งค่า (เก็บใน Supabase) ======================
@@ -186,6 +209,10 @@ def _with_defaults(data):
     data = dict(data or {})
     data.setdefault("wait_seconds", 10)
     data.setdefault("line_groups", [])
+    for grp in data["line_groups"]:
+        if isinstance(grp, dict):
+            grp.setdefault("send", True)   # ส่งใบสรุปเข้ากลุ่ม
+            grp.setdefault("read", False)  # อ่านใบงานที่โพสต์ในกลุ่ม (ปิด = ส่งได้อย่างเดียว)
     data.setdefault("custom_keywords", [])
     data.setdefault("main_roads_dict", copy.deepcopy(DEFAULT_MAIN_ROADS_DICT))
     data.setdefault("major_areas_dict", copy.deepcopy(DEFAULT_MAJOR_AREAS_DICT))
@@ -262,6 +289,7 @@ def persist_state():
             "latest_jobs": list(latest_jobs),
             "last_sender_id": last_sender_id,
             "timer_start_time": timer_start_time,
+            "pending_update_dates": list(pending_update_dates),
         }
     try:
         storage.set("job_state", snapshot)
@@ -271,7 +299,7 @@ def persist_state():
 
 def restore_state():
     """โหลดคิวที่ค้างอยู่กลับมา และเริ่มนับเวลาต่อ"""
-    global job_queue, latest_jobs, last_sender_id, timer_start_time
+    global job_queue, latest_jobs, last_sender_id, timer_start_time, pending_update_dates
     try:
         snap = storage.get("job_state")
     except storage.StorageError as e:
@@ -283,7 +311,8 @@ def restore_state():
         job_queue = snap.get("job_queue") or []
         latest_jobs = snap.get("latest_jobs") or []
         last_sender_id = snap.get("last_sender_id")
-        if job_queue:
+        pending_update_dates = snap.get("pending_update_dates") or []
+        if job_queue or pending_update_dates:
             wait_seconds = int(load_settings().get("wait_seconds", 10))
             started = snap.get("timer_start_time") or time.time()
             remaining = max(5, wait_seconds - (time.time() - started))
@@ -368,9 +397,9 @@ def parse_location_rule_based(raw_location):
         if kw and kw.lower() in lower_loc:
             return target if target else cleaned
 
-    # 0.1 เศษข้อความหลุด เช่น "ei Nuea" จาก Khlong Toei Nuea ให้ตีเป็นสุขุมวิท
-    if "EI NUEA" in upper_loc or "KHLONG TOEI" in upper_loc:
-        return "สุขุมวิท"
+    for name, target in BUILTIN_PLACES.items():
+        if name in lower_loc:
+            return target
 
     # 1. สนามบินดอนเมือง
     if any(k in upper_loc for k in ["DMK", "DON MUEANG", "ดอนเมือง", "แอร์ดอน"]):
@@ -380,8 +409,13 @@ def parse_location_rule_based(raw_location):
     if any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ", "สุวรรณภูมิ"]):
         return "แอร์สุ"
 
-    # 3. Sukhumvit ตามด้วยเลขซอย
-    if re.search(r'\bSukhumvit\s*\d+\b', cleaned, flags=re.IGNORECASE):
+    # 3. Sukhumvit ตามด้วยเลขซอย -> สุขุมวิท22
+    soi = re.search(r'\bSukhumvit\s*(?:Soi\s*)?(\d+)\b', cleaned, flags=re.IGNORECASE)
+    if soi:
+        return f"สุขุมวิท{soi.group(1)}"
+
+    # 3.1 เศษข้อความหลุด เช่น "ei Nuea" จาก Khlong Toei Nuea ให้ตีเป็นสุขุมวิท
+    if "EI NUEA" in upper_loc or "KHLONG TOEI" in upper_loc:
         return "สุขุมวิท"
 
     # 4. ถนนหลัก แล้วค่อย 5. ย่านสำคัญ
@@ -426,10 +460,109 @@ def _place_code(mapped):
     return "BK"
 
 
-def parse_job_text(raw_text, fallback_id="F01"):
-    if not raw_text:
-        return {}
+_QUOTES = "\"'“”"
+_SIGN_RE = re.compile(r'^ชูป้าย')
+_DATE_LINE_RE = re.compile(r'^(\d{4})-(\d{1,2})-(\d{1,2})$|^(\d{1,2})/(\d{1,2})/(\d{4})$')
+_TIME_LINE_RE = re.compile(r'^(\d{1,2}):(\d{2})$')
+_FLIGHT_LINE_RE = re.compile(r'^[A-Za-z0-9]{2}\s?\d{1,4}[A-Za-z]?$')
+_JOB_CODE_RE = re.compile(r'^[A-Za-z]{1,4}\d{1,4}$')
+_ORDER_LINE_RE = re.compile(r'^(?=.*\d)(?=.*[A-Za-z])[A-Za-z0-9_-]{6,}$')
+_PHONE_LINE_RE = re.compile(r'^\+?[\d\s()-]+$')
+_PLATE_RE = re.compile(r'CAR\s*NO\.?\s*[:：]\s*(.+)', re.IGNORECASE)
+_DRIVER_LINE_RE = re.compile(r'^\s*(?:CAR\s*NO|TEL|APP|TYPE\s*CAR)\.?\s*[:：]', re.IGNORECASE)
 
+
+def _clean_lines(raw_text):
+    return [ln.strip().strip(_QUOTES).strip() for ln in raw_text.splitlines()]
+
+
+def _norm_date(text):
+    m = _DATE_LINE_RE.match(text.strip())
+    if not m:
+        return None
+    if m.group(1):
+        y, mo, d = m.group(1), m.group(2), m.group(3)
+    else:
+        d, mo, y = m.group(4), m.group(5), m.group(6)
+    return f"{int(d):02d}/{int(mo):02d}/{y}"
+
+
+def _norm_time(text):
+    m = re.match(r'^(\d{1,2}):(\d{2})', str(text).strip())
+    return f"{int(m.group(1)):02d}:{m.group(2)}" if m else text
+
+
+def is_voucher_format(raw_text):
+    """ใบงานแบบใหม่ (KKday / Book on A Budget ...) มีหัวใบงาน: เที่ยวบิน / วันที่ / เวลา / ชูป้าย ... / รหัสงาน"""
+    return "【" not in raw_text and any(_SIGN_RE.match(ln) for ln in _clean_lines(raw_text))
+
+
+def extract_plate(raw_text):
+    """ดึงป้ายทะเบียนจากบรรทัด CAR NO : 5 ขพ 9425 -> 5ขพ9425"""
+    m = _PLATE_RE.search(raw_text or "")
+    if not m:
+        return ""
+    return re.sub(r'\s+', '', m.group(1))
+
+
+def strip_driver_lines(raw_text):
+    """ตัดบรรทัดข้อมูลคนขับ (CAR NO / TEL / APP / TYPE CAR) ออก เหลือแต่ใบงาน"""
+    return "\n".join(ln for ln in raw_text.splitlines() if not _DRIVER_LINE_RE.match(ln)).strip()
+
+
+def _parse_voucher(raw_text):
+    lines = [ln for ln in _clean_lines(raw_text) if ln]
+    header = {}
+    used = set()
+
+    sign_idx = next(i for i, ln in enumerate(lines) if _SIGN_RE.match(ln))
+    used.add(sign_idx)
+    if sign_idx + 1 < len(lines) and _JOB_CODE_RE.match(lines[sign_idx + 1]):
+        header["id"] = lines[sign_idx + 1].upper()
+        used.add(sign_idx + 1)
+    # ย้อนขึ้นไปจากบรรทัดชูป้าย: เวลา -> วันที่ -> เที่ยวบิน
+    i = sign_idx - 1
+    if i >= 0 and _TIME_LINE_RE.match(lines[i]):
+        header["time"] = _norm_time(lines[i])
+        used.add(i)
+        i -= 1
+    if i >= 0 and _norm_date(lines[i]):
+        header["date"] = _norm_date(lines[i])
+        used.add(i)
+        i -= 1
+    if i >= 0 and _FLIGHT_LINE_RE.match(lines[i]):
+        header["flight"] = re.sub(r'\s+', '', lines[i]).upper()
+        used.add(i)
+
+    ticket = [ln for i, ln in enumerate(lines) if i not in used]
+
+    order = next((ln for ln in ticket if _ORDER_LINE_RE.match(ln)), "-")
+
+    pickup_raw, dropoff_raw = "-", "-"
+    phone_idx = next((i for i, ln in enumerate(ticket)
+                      if _PHONE_LINE_RE.match(ln) and len(re.sub(r'\D', '', ln)) >= 8), None)
+    if phone_idx is not None and phone_idx + 1 < len(ticket):
+        # หลังเบอร์โทร: บรรทัดแรก = จุดรับ ที่เหลือ = จุดส่ง (ที่อยู่อาจยาวหลายบรรทัด)
+        pickup_raw = ticket[phone_idx + 1]
+        dropoff_raw = " ".join(ticket[phone_idx + 2:]) or "-"
+    elif len(ticket) >= 2:
+        pickup_raw, dropoff_raw = ticket[-2], ticket[-1]
+
+    car_info = match_car("\n".join(ticket))
+
+    return {
+        "id": header.get("id", ""),
+        "date": header.get("date", "-"),
+        "time": header.get("time", "-"),
+        "flight": header.get("flight", "-"),
+        "pickup_raw": pickup_raw,
+        "dropoff_raw": dropoff_raw,
+        "car_info": car_info,
+        "order": order,
+    }
+
+
+def _parse_legacy(raw_text):
     # รหัสใบงาน = หัวข้อบรรทัดแรกของใบงาน (เช่น F03) รหัสอื่นก็ใช้ได้หมด
     job_id = ""
     for ln in raw_text.splitlines():
@@ -442,7 +575,7 @@ def parse_job_text(raw_text, fallback_id="F01"):
         break
     if not job_id:
         id_match = re.search(r'\b(F\d+)\b', raw_text, re.IGNORECASE)
-        job_id = id_match.group(1).strip() if id_match else fallback_id
+        job_id = id_match.group(1).strip() if id_match else ""
 
     date_match = re.search(r'(?:【(?:日期วันที่|日期|วันที่)】|วันที่|Date)[:\s]*([\d/\-]+)', raw_text, re.IGNORECASE)
     date_val = date_match.group(1).strip() if date_match else "-"
@@ -471,37 +604,57 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if dropoff_tag:
         dropoff_raw = dropoff_tag.group(1).strip()
 
-    # แปลงชื่อสถานที่
-    pickup_mapped = parse_location_rule_based(pickup_raw)
-    dropoff_mapped = parse_location_rule_based(dropoff_raw)
-
-    # จัดการเรื่องขนาดรถและราคา
+    # จัดการเรื่องขนาดรถ: ดูบรรทัดขนาดรถก่อน ถ้าไม่มีค่อยหาทั้งใบงาน
     car_raw_match = re.search(r'(?:【(?:车型ขนาดรถ|车型|ขนาดรถ)】|รถ|ขนาดรถ|Car)[:\s]*(.+)', raw_text, re.IGNORECASE)
-    if car_raw_match:
-        car_raw = car_raw_match.group(1).strip().upper()
-    else:
-        car_raw = "5 SEAT"
-        for key in CAR_PRICING_MAP.keys():
-            if key in raw_text.upper():
-                car_raw = key
-                break
-    
-    car_info = CAR_PRICING_MAP.get(car_raw)
+    car_info = match_car(car_raw_match.group(1)) if car_raw_match else None
     if not car_info:
-        # เช่น "7 SEAT (CAMRY)" -> หาคำที่ยาวที่สุดที่อยู่ในข้อความ
-        for key in sorted(CAR_PRICING_MAP.keys(), key=len, reverse=True):
-            if key in car_raw:
-                car_info = CAR_PRICING_MAP[key]
-                break
-    if not car_info:
-        car_info = {"code": "5S", "price": "380"}
-    car_code = car_info["code"]
-    price_val = car_info["price"]
+        car_info = match_car(raw_text)
 
     order_match = re.search(r'(?:【(?:客户订单号|订单号|Order)】|Order|Order Number|คำสั่งซื้อ|Order ID)[:\s]*([0-9A-Za-z_-]+)', raw_text, re.IGNORECASE)
     if not order_match:
         order_match = re.search(r'\b(\d{8,20})\b', raw_text)
     order_val = order_match.group(1).strip() if order_match else "-"
+
+    return {
+        "id": job_id,
+        "date": date_val,
+        "time": time_val,
+        "flight": flight_val,
+        "pickup_raw": pickup_raw,
+        "dropoff_raw": dropoff_raw,
+        "car_info": car_info,
+        "order": order_val,
+    }
+
+
+def build_summary(job_id, mark, time_val, price, car_code, route_code, pickup, dropoff, flight, order):
+    return f"{job_id}({mark}){time_val}/{price}#{car_code}/{route_code}\n{pickup}-{dropoff} ✈️{flight}\n{order}"
+
+
+def apply_plate(summary, plate):
+    """แทนที่ไอคอนในวงเล็บแรกด้วยป้ายทะเบียน: F01(🥶)... -> F01(5ขพ9425)..."""
+    return re.sub(r'^([^(\n]*)\([^)\n]*\)', lambda m: f"{m.group(1)}({plate})", summary, count=1)
+
+
+def parse_job_text(raw_text, fallback_id="F01"):
+    if not raw_text:
+        return {}
+
+    fields = _parse_voucher(raw_text) if is_voucher_format(raw_text) else _parse_legacy(raw_text)
+    job_id = fields["id"] or fallback_id
+    time_val = _norm_time(fields["time"])
+    flight_val = fields["flight"]
+    order_val = fields["order"]
+    pickup_raw = fields["pickup_raw"]
+    dropoff_raw = fields["dropoff_raw"]
+
+    # แปลงชื่อสถานที่
+    pickup_mapped = parse_location_rule_based(pickup_raw)
+    dropoff_mapped = parse_location_rule_based(dropoff_raw)
+
+    car_info = fields["car_info"] or {"code": "5S", "price": "380"}
+    car_code = car_info["code"]
+    price_val = car_info["price"]
 
     # เงื่อนไขไอคอน: ถ้าตำแหน่งที่ 2 (จุดส่ง) เป็น แอร์ดอน หรือ แอร์สุ ให้ใช้ 🔥 ที่เหลือใช้ 🥶
     if dropoff_mapped in ["แอร์ดอน", "แอร์สุ"]:
@@ -512,11 +665,12 @@ def parse_job_text(raw_text, fallback_id="F01"):
     # รหัสจุดรับ-จุดส่ง: S = แอร์สุ, D = แอร์ดอน, BK = สถานที่/โรงแรมในกรุงเทพ
     route_code = f"{_place_code(pickup_mapped)}-{_place_code(dropoff_mapped)}"
 
-    formatted_summary = f"{job_id}({icon_symbol}){time_val}/{price_val}#{car_code}/{route_code}\n{pickup_mapped}-{dropoff_mapped} ✈️{flight_val}\n{order_val}"
+    formatted_summary = build_summary(job_id, icon_symbol, time_val, price_val, car_code, route_code,
+                                      pickup_mapped, dropoff_mapped, flight_val, order_val)
 
     return {
         "id": job_id,
-        "date": date_val,
+        "date": fields["date"],
         "time": time_val,
         "pickup_raw": pickup_raw,
         "pickup": pickup_mapped,
@@ -581,13 +735,70 @@ def add_job_to_queue(text, sender_id=None):
         latest_jobs.insert(0, job_item)
         latest_jobs = latest_jobs[:MAX_HISTORY]
 
-        if len(job_queue) == 1 and timer_thread is None:
-            wait_seconds = int(load_settings().get("wait_seconds", 10))
-            _start_timer(wait_seconds)
-            print(f"⏱️ เริ่มนับเวลาประมวลผลอีก {wait_seconds} วินาที...")
+        _ensure_timer()
 
     persist_state()
     return True, job_item
+
+
+def _ensure_timer():
+    """เริ่มนับเวลาส่งรอบใหม่ (ถ้ายังไม่ได้นับอยู่) ต้องเรียกตอนถือ state_lock"""
+    if timer_thread is None:
+        wait_seconds = int(load_settings().get("wait_seconds", 10))
+        _start_timer(wait_seconds)
+        print(f"⏱️ เริ่มนับเวลาประมวลผลอีก {wait_seconds} วินาที...")
+
+
+def _norm_job_date(raw_date):
+    raw_date = str(raw_date or now_th().strftime("%d/%m/%Y"))
+    try:
+        return datetime.datetime.strptime(raw_date.replace('-', '/'), "%d/%m/%Y").strftime("%d/%m/%Y")
+    except Exception:
+        return raw_date
+
+
+def update_plate(text, plate, sender_id=None):
+    """อัปเดตใบงานเดิมเป็นป้ายทะเบียน (ค้นจาก Order) ถ้าไม่เจอใบงานเดิมจะเพิ่มเป็นใบงานใหม่"""
+    global last_sender_id
+    ticket = strip_driver_lines(text)
+    parsed = parse_job_text(ticket)
+    order = str(parsed.get("order", "")).strip()
+
+    with state_lock:
+        matches = [j for j in job_queue + latest_jobs
+                   if order and order != "-" and str(j.get("order", "")).strip() == order]
+        if matches:
+            queued_keys = {id(j) for j in job_queue}
+            only_queued = True
+            for job in matches:
+                job["plate"] = plate
+                job["formatted_summary"] = apply_plate(job["formatted_summary"], plate)
+                if id(job) not in queued_keys and job.get("status") != "รอส่ง":
+                    only_queued = False
+            # ใบงานที่ส่งไปแล้ว -> ส่งใบสรุปของวันนั้นใหม่พร้อมป้ายทะเบียน
+            if not only_queued:
+                d = _norm_job_date(matches[0].get("date"))
+                if d not in pending_update_dates:
+                    pending_update_dates.append(d)
+                if sender_id:
+                    last_sender_id = sender_id
+                _ensure_timer()
+            job_id = matches[0].get("id")
+        else:
+            job_id = None
+
+    if job_id is None:
+        ok, result = add_job_to_queue(ticket, sender_id=sender_id)
+        if not ok:
+            return False, result
+        with state_lock:
+            result["plate"] = plate
+            result["formatted_summary"] = apply_plate(result["formatted_summary"], plate)
+        persist_state()
+        return True, result
+
+    persist_state()
+    return True, {"id": job_id, "plate": plate}
 
 
 def _date_sort_key(d):
@@ -600,8 +811,12 @@ def _date_sort_key(d):
 
 
 def _id_sort_key(job):
-    m = re.search(r'(\d+)', str(job.get("id", "")))
-    return (int(m.group(1)) if m else 10**9, str(job.get("id", "")))
+    """เรียงตามตัวอักษรแล้วตามตัวเลขของรหัสใบงาน เช่น F01, F02, VK01, VK04"""
+    job_id = str(job.get("id", "")).strip().upper()
+    m = re.match(r'^([^\d]*)(\d+)', job_id)
+    if m:
+        return (m.group(1), int(m.group(2)), job_id)
+    return (job_id, 10**9, job_id)
 
 
 def generate_batch_summary(jobs):
@@ -610,12 +825,7 @@ def generate_batch_summary(jobs):
 
     date_groups = {}
     for job in jobs:
-        raw_date = str(job.get("date") or now_th().strftime("%d/%m/%Y"))
-        try:
-            job_date = datetime.datetime.strptime(raw_date.replace('-', '/'), "%d/%m/%Y").strftime("%d/%m/%Y")
-        except Exception:
-            job_date = raw_date
-        date_groups.setdefault(job_date, []).append(job)
+        date_groups.setdefault(_norm_job_date(job.get("date")), []).append(job)
 
     blocks = []
     sorted_dates = sorted(date_groups.keys(), key=_date_sort_key)
@@ -636,28 +846,41 @@ def generate_batch_summary(jobs):
 
 def process_batch_jobs():
     """ส่งสรุปใบงานทั้งหมดในคิว: LINE ก่อน แล้วค่อยบันทึก Google Sheets"""
-    global job_queue, timer_thread, timer_start_time, last_sender_id
+    global job_queue, timer_thread, timer_start_time, last_sender_id, pending_update_dates
 
     with state_lock:
         if timer_thread is not None and threading.current_thread() is not timer_thread:
             timer_thread.cancel()
         jobs = list(job_queue)
+        update_dates = list(pending_update_dates)
         target_sender_id = last_sender_id
         # เคลียร์คิวทันที ใบงานใหม่ที่เข้ามาระหว่างส่งจะเริ่มรอบใหม่ได้เลย
         job_queue = []
+        pending_update_dates = []
         timer_thread = None
         timer_start_time = None
         last_sender_id = None
 
-    if not jobs:
+        # วันที่ที่มีการอัปเดตป้ายทะเบียน: ส่งใบงานทั้งหมดของวันนั้นใหม่ (ใบงานใหม่ของวันนั้นรวมอยู่แล้ว)
+        to_send = [j for j in jobs if _norm_job_date(j.get("date")) not in update_dates]
+        seen = set()
+        for job in latest_jobs:  # ใหม่สุดก่อน ใบงานซ้ำเอาอันล่าสุด
+            key = _job_key(job)
+            if (_norm_job_date(job.get("date")) in update_dates
+                    and job.get("status") != "ยกเลิก" and key not in seen):
+                seen.add(key)
+                to_send.append(job)
+
+    if not jobs and not to_send:
         persist_state()
         return
 
     try:
-        summary_text = generate_batch_summary(jobs)
+        summary_text = generate_batch_summary(to_send)
         if summary_text:
             settings = load_settings()
-            active_groups = [g for g in settings.get("line_groups", []) if g.get("group_id")]
+            active_groups = [g for g in settings.get("line_groups", [])
+                             if g.get("group_id") and g.get("send", True)]
             targets = []
             if target_sender_id:
                 targets.append(("ผู้ส่ง (LINE OA)", target_sender_id))
@@ -676,7 +899,7 @@ def process_batch_jobs():
                     except Exception as e:
                         print(f"❌ ส่งข้อความไปยัง {label} ล้มเหลว: {e}")
 
-            if GOOGLE_SPREADSHEET_ID:
+            if GOOGLE_SPREADSHEET_ID and jobs:
                 try:
                     ok = save_to_google_sheets(GOOGLE_SPREADSHEET_ID, [j["text"] for j in jobs], jobs)
                     print("✅ บันทึกข้อมูลลง Google Sheets สำเร็จ" if ok else "❌ บันทึก Google Sheets ล้มเหลว")
@@ -709,7 +932,20 @@ def handle_message(event):
             )
         return
 
-    if "【客户订单号】" not in received_text:
+    # กลุ่มที่ไม่ได้เปิด "อ่านใบงาน" -> ห้ามอ่านงานในกลุ่มนั้น (ส่งใบสรุปได้อย่างเดียว)
+    if source_type in ('group', 'room'):
+        chat_id = getattr(event.source, 'group_id', None) or getattr(event.source, 'room_id', None)
+        grp = next((g for g in load_settings().get("line_groups", [])
+                    if str(g.get("group_id", "")).strip() == chat_id), None)
+        if not grp or not grp.get("read"):
+            return
+
+    plate = extract_plate(received_text)
+    if plate:
+        update_plate(received_text, plate, sender_id=user_id)
+        return
+
+    if "【客户订单号】" not in received_text and not is_voucher_format(received_text):
         return
 
     add_job_to_queue(received_text, sender_id=user_id)
@@ -819,7 +1055,8 @@ def api_add_job():
     text = str(data.get("text", "")).strip()
     if not text:
         return jsonify({"success": False, "message": "ข้อความว่างเปล่า"}), 400
-    ok, result = add_job_to_queue(text)
+    plate = extract_plate(text)
+    ok, result = update_plate(text, plate) if plate else add_job_to_queue(text)
     if ok:
         return jsonify({"success": True, "id": result["id"], "message": "เพิ่มใบงานสำเร็จ"})
     return jsonify({"success": False, "message": result})
@@ -862,11 +1099,12 @@ def api_delete_job(job_id=None):
 
 @app.route("/api/clear_queue", methods=["POST"])
 def api_clear_queue():
-    global job_queue, timer_thread, timer_start_time
+    global job_queue, timer_thread, timer_start_time, pending_update_dates
     with state_lock:
         if timer_thread:
             timer_thread.cancel()
         num_cleared = len(job_queue)
+        pending_update_dates = []
         cleared_keys = {_job_key(j) for j in job_queue}
         job_queue = []
         timer_thread = None
