@@ -470,7 +470,7 @@
        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
         <div>
          <h2 class="m-0 text-sm font-bold text-[#0F172A]">เชื่อมต่อกลุ่ม LINE (LINE Groups)</h2>
-         <p class="mt-1 text-xs text-[#64748B]">เพิ่ม Group ID เพื่อส่งสรุปใบงานไปยังกลุ่มที่ต้องการ (พิมพ์คำสั่งหา ID จากบอทในกลุ่ม)</p>
+         <p class="mt-1 text-xs text-[#64748B]">เพิ่ม Group ID เพื่อส่งสรุปใบงานไปยังกลุ่มที่ต้องการ (พิมพ์ id ในกลุ่มเพื่อหา ID) · ติ๊ก "อ่านใบงาน" เฉพาะกลุ่มที่ให้บอทอ่านใบงาน กลุ่มที่ไม่ติ๊กจะส่งได้อย่างเดียว</p>
         </div>
         <button id="open-add-group-modal" type="button" class="rounded-lg bg-[#EFF6FF] text-[#2563EB] px-3 py-1.5 text-xs font-semibold hover:bg-blue-100 transition-colors flex items-center gap-1 w-fit">
          <i data-lucide="plus" class="h-3.5 w-3.5"></i> เพิ่มกลุ่ม LINE
@@ -874,16 +874,25 @@
         return;
       }
       emptyText.classList.add('hidden');
-      container.innerHTML = groups.map((item) => `
-        <div class="flex items-center gap-2 line-group-row p-2 bg-gray-50 rounded-lg border border-gray-100">
-          <input type="text" placeholder="ชื่อกลุ่ม (เช่น กลุ่มรถ โซน A)" value="${escapeHtml(item.name || '')}" class="group-name-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-          <input type="text" placeholder="LINE Group ID (Cxxxxxxxx...)" value="${escapeHtml(item.group_id || '')}" class="group-id-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs font-mono outline-none focus:border-[#2563EB]">
-          <button type="button" onclick="confirmDeleteRow(this, '.line-group-row', toggleGroupsEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
+      container.innerHTML = groups.map(groupRowHtml).join('');
+      lucide.createIcons();
+    }
+
+    // แถวกลุ่ม LINE: ส่ง = ส่งใบสรุปเข้ากลุ่ม, อ่าน = อ่านใบงานที่โพสต์ในกลุ่ม (ปิด = ส่งได้อย่างเดียว)
+    function groupRowHtml(item) {
+      const send = item.send !== false;
+      const read = item.read === true;
+      return `
+        <div class="flex flex-wrap sm:flex-nowrap items-center gap-2 line-group-row p-2 bg-gray-50 rounded-lg border border-gray-100">
+          <input type="text" placeholder="ชื่อกลุ่ม (เช่น กลุ่มรถ โซน A)" value="${escapeHtml(item.name || '')}" class="group-name-input w-full sm:w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
+          <input type="text" placeholder="LINE Group ID (Cxxxxxxxx...)" value="${escapeHtml(item.group_id || '')}" class="group-id-input w-full sm:w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs font-mono outline-none focus:border-[#2563EB]">
+          <label class="flex items-center gap-1 text-xs text-gray-700 whitespace-nowrap"><input type="checkbox" class="group-send-input" ${send ? 'checked' : ''}> ส่งใบสรุป</label>
+          <label class="flex items-center gap-1 text-xs text-gray-700 whitespace-nowrap"><input type="checkbox" class="group-read-input" ${read ? 'checked' : ''}> อ่านใบงาน</label>
+          <button type="button" onclick="confirmDeleteRow(this, '.line-group-row', toggleGroupsEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50 ml-auto">
             <i data-lucide="trash-2" class="h-4 w-4"></i>
           </button>
         </div>
-      `).join('');
-      lucide.createIcons();
+      `;
     }
 
     function toggleGroupsEmpty() {
@@ -1006,15 +1015,8 @@
           const container = document.getElementById('line-groups-container');
           document.getElementById('line-groups-empty').classList.add('hidden');
           const div = document.createElement('div');
-          div.className = "flex items-center gap-2 line-group-row p-2 bg-gray-50 rounded-lg border border-gray-100";
-          div.innerHTML = `
-            <input type="text" value="${escapeHtml(name)}" class="group-name-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
-            <input type="text" value="${escapeHtml(groupId)}" class="group-id-input w-1/2 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs font-mono outline-none focus:border-[#2563EB]">
-            <button type="button" onclick="confirmDeleteRow(this, '.line-group-row', toggleGroupsEmpty)" class="p-2 rounded-lg text-red-500 hover:bg-red-50">
-              <i data-lucide="trash-2" class="h-4 w-4"></i>
-            </button>
-          `;
-          container.appendChild(div);
+          div.innerHTML = groupRowHtml({ name: name, group_id: groupId, send: true, read: false });
+          container.appendChild(div.firstElementChild);
           lucide.createIcons();
           closeDynamicModal();
           showToast("เพิ่มกลุ่ม LINE เรียบร้อยแล้ว");
@@ -1234,7 +1236,12 @@
               const name = row.querySelector(".group-name-input").value.trim();
               const groupId = row.querySelector(".group-id-input").value.trim();
               if (name && groupId) {
-                lineGroups.push({ name: name, group_id: groupId });
+                lineGroups.push({
+                  name: name,
+                  group_id: groupId,
+                  send: row.querySelector(".group-send-input").checked,
+                  read: row.querySelector(".group-read-input").checked
+                });
               }
             });
 
