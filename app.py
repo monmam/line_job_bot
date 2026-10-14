@@ -205,6 +205,8 @@ CAR_PRICING_MAP = {
     "CAM": {"code": "Cam", "price": "480"},
     "MPV": {"code": "7S", "price": "480"},
     "EV": {"code": "EV", "price": "380"},
+    "ECONOMY VAN": {"code": "Van", "price": "700"},
+    "VAN": {"code": "Van", "price": "700"},
 }
 
 # โรงแรม/สถานที่ที่ใบงานไม่มีที่อยู่ให้ (ชื่อตัวเล็ก = ผลลัพธ์)
@@ -825,6 +827,37 @@ def update_plate(text, plate, sender_id=None):
     return True, {"id": job_id, "plate": plate}
 
 
+_RETURN_RE = re.compile(r'^\s*([A-Za-z]+\d+)\s*คืน\s*$')
+RETURN_MARK = "📌"
+
+
+def return_plate(job_id, sender_id=None):
+    """พิมพ์ 'VK06 คืน' -> เปลี่ยนป้ายทะเบียนของ VK06 เป็น 📌 แล้วส่งรายการย่อของวันนั้นใหม่"""
+    global last_sender_id
+    job_id = job_id.strip().upper()
+    with state_lock:
+        # ใหม่สุดก่อน: ใช้ใบงานล่าสุดของรหัสนั้น (ข้ามใบที่ยกเลิก)
+        matches = [j for j in job_queue + latest_jobs
+                   if str(j.get("id", "")).strip().upper() == job_id and j.get("status") != "ยกเลิก"]
+        if not matches:
+            return False, f"ไม่พบใบงาน {job_id}"
+        target = matches[0]
+        queued_keys = {id(j) for j in job_queue}
+        for job in matches:
+            if _job_key(job) == _job_key(target):
+                job["plate"] = RETURN_MARK
+                job["formatted_summary"] = apply_plate(job["formatted_summary"], RETURN_MARK)
+        if id(target) not in queued_keys and target.get("status") != "รอส่ง":
+            d = _norm_job_date(target.get("date"))
+            if d not in pending_update_dates:
+                pending_update_dates.append(d)
+            if sender_id:
+                last_sender_id = sender_id
+            _ensure_timer()
+    persist_state()
+    return True, target
+
+
 def _date_sort_key(d):
     for fmt in ("%d/%m/%Y", "%Y/%m/%d", "%d/%m/%y"):
         try:
@@ -1018,6 +1051,14 @@ def handle_message(event):
 
     chat_id = (getattr(event.source, 'group_id', None) or getattr(event.source, 'room_id', None)
                or user_id)
+
+    m = _RETURN_RE.match(received_text)
+    if m:
+        ok, result = return_plate(m.group(1), sender_id=user_id)
+        print(f"📌 คืนป้าย {m.group(1).upper()}" if ok else f"⚠️ {result}")
+        if ok:
+            _remember_reply(event.reply_token, chat_id)
+        return
 
     plate = extract_plate(received_text)
     if plate:
