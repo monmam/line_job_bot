@@ -907,9 +907,8 @@ def process_batch_jobs():
         timer_start_time = None
         last_sender_id = None
 
-        # ใบสรุปปกติ = ใบงานใหม่ + (ถ้ามีอัปเดตป้ายทะเบียน) ใบงานทั้งวันของวันนั้น
+        # ใบสรุปปกติ = เฉพาะใบงานใหม่ (อัปเดตป้ายทะเบียนส่งแค่รายการย่อ ไม่ส่งใบสรุปเต็มซ้ำ)
         to_send = list(jobs)
-        seen = {_job_key(j) for j in jobs}
         day_jobs = {}
         for job in latest_jobs:  # ใหม่สุดก่อน ใบงานซ้ำเอาอันล่าสุด
             d = _norm_job_date(job.get("date"))
@@ -919,18 +918,16 @@ def process_batch_jobs():
             if key in day_jobs:
                 continue
             day_jobs[key] = job
-            if d in update_dates and _job_key(job) not in seen:
-                seen.add(_job_key(job))
-                to_send.append(job)
         all_day_jobs = list(day_jobs.values())
 
-    if not jobs and not to_send:
+    if not jobs and not all_day_jobs:
         persist_state()
         return
 
     try:
         summary_text = generate_batch_summary(to_send)
-        if summary_text:
+        list_text = generate_compact_list(all_day_jobs)
+        if summary_text or list_text:
             settings = load_settings()
             active_groups = [g for g in settings.get("line_groups", [])
                              if g.get("group_id") and g.get("send", True)]
@@ -943,7 +940,6 @@ def process_batch_jobs():
             # LINE จำกัด 5000 ตัวอักษรต่อข้อความ
             chunks = [summary_text[i:i + 4900] for i in range(0, len(summary_text), 4900)][:4]
             # ข้อความเพิ่มเติม: รายการย่อของใบงานทั้งวัน (เฉพาะบรรทัดแรกของแต่ละใบงาน)
-            list_text = generate_compact_list(all_day_jobs)
             if list_text:
                 chunks.append(list_text[:4900])
             for label, to in targets:
