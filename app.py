@@ -16,7 +16,7 @@ from linebot.v3.exceptions import InvalidSignatureError
 from linebot.v3.messaging import (
     Configuration, ApiClient, MessagingApi, PushMessageRequest, ReplyMessageRequest, TextMessage
 )
-from linebot.v3.webhooks import MessageEvent, TextMessageContent
+from linebot.v3.webhooks import MessageEvent, TextMessageContent, JoinEvent, LeaveEvent
 
 load_dotenv()
 
@@ -937,6 +937,8 @@ def process_batch_jobs():
             for grp in active_groups:
                 targets.append((f"กลุ่ม {grp.get('name')}", grp.get("group_id")))
 
+            print(f"📤 ส่งใบสรุปไปยัง: {[(l, str(t)[:8] + '…') for l, t in targets]} "
+                  f"(กลุ่มที่ติ๊กส่ง {len(active_groups)} จาก {len(settings.get('line_groups', []))})")
             # LINE จำกัด 5000 ตัวอักษรต่อข้อความ
             chunks = [summary_text[i:i + 4900] for i in range(0, len(summary_text), 4900)][:4]
             # ข้อความเพิ่มเติม: รายการย่อของใบงานทั้งวัน (เฉพาะบรรทัดแรกของแต่ละใบงาน)
@@ -971,6 +973,20 @@ def process_batch_jobs():
                 if (_job_key(job), job.get("id")) in sent_keys:
                     job["status"] = "ส่งแล้ว"
         persist_state()
+
+
+@handler.add(JoinEvent)
+def handle_join(event):
+    src = event.source
+    cid = getattr(src, 'group_id', None) or getattr(src, 'room_id', None)
+    print(f"➕ บอทถูกเชิญเข้า {src.type}: {cid}")
+
+
+@handler.add(LeaveEvent)
+def handle_leave(event):
+    src = event.source
+    cid = getattr(src, 'group_id', None) or getattr(src, 'room_id', None)
+    print(f"➖ บอทถูกนำออกจาก {src.type}: {cid}")
 
 
 @handler.add(MessageEvent, message=TextMessageContent)
