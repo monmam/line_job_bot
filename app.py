@@ -432,7 +432,8 @@ def parse_location_rule_based(raw_location):
         return "แอร์ดอน"
 
     # 2. สนามบินสุวรรณภูมิ
-    if any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ", "สุวรรณภูมิ"]):
+    if (any(k in upper_loc for k in ["BKK", "SUVARNABHUMI", "SVB", "แอร์สุ", "สุวรรณภูมิ"])
+            or re.search(r'(?<![A-Z])SUV(?![A-Z])', upper_loc)):
         return "แอร์สุ"
 
     # 3. Sukhumvit ตามด้วยเลขซอย -> สุขุมวิท22
@@ -489,7 +490,7 @@ def _place_code(mapped):
 _QUOTES = "\"'“”"
 _SIGN_RE = re.compile(r'^ชูป้าย')
 _DATE_LINE_RE = re.compile(r'^(\d{4})-(\d{1,2})-(\d{1,2})$|^(\d{1,2})/(\d{1,2})/(\d{4})$')
-_TIME_LINE_RE = re.compile(r'^(\d{1,2}):(\d{2})$')
+_TIME_LINE_RE = re.compile(r'^(?:Amend\s*>*\s*)?(\d{1,2})[:.](\d{2})$', re.IGNORECASE)
 _FLIGHT_LINE_RE = re.compile(r'^[A-Za-z0-9]{2}\s?\d{1,4}[A-Za-z]?$')
 _JOB_CODE_RE = re.compile(r'^[A-Za-z]{1,4}\d{1,4}$')
 _ORDER_LINE_RE = re.compile(r'^(?=.*\d)(?=.*[A-Za-z])[A-Za-z0-9_-]{6,}$')
@@ -514,7 +515,7 @@ def _norm_date(text):
 
 
 def _norm_time(text):
-    m = re.match(r'^(\d{1,2}):(\d{2})', str(text).strip())
+    m = re.match(r'^(?:Amend\s*>*\s*)?(\d{1,2})[:.](\d{2})', str(text).strip(), re.IGNORECASE)
     return f"{int(m.group(1)):02d}:{m.group(2)}" if m else text
 
 
@@ -585,6 +586,97 @@ def _parse_voucher(raw_text):
         "dropoff_raw": dropoff_raw,
         "car_info": car_info,
         "order": order,
+    }
+
+
+_KV_ORDER_RE = re.compile(r'^\s*(?:Booking Reference ID|Booking ID)\s*[:：]', re.IGNORECASE | re.MULTILINE)
+
+
+def is_kv_format(raw_text):
+    """ใบงานแบบ 'คีย์ : ค่า' (Booking Reference ID / Booking ID ...) เช่น TT1, Million Holiday"""
+    return bool(_KV_ORDER_RE.search(raw_text or "")) and "【" not in raw_text
+
+
+def _kv_pairs(raw_text):
+    pairs = {}
+    for ln in raw_text.splitlines():
+        m = re.match(r'^\s*([A-Za-z][A-Za-z /]*?)\s*[:：]\s*(.*)$', ln)
+        if m:
+            key = re.sub(r'\s+', ' ', m.group(1).strip().lower())
+            pairs.setdefault(key, m.group(2).strip())
+    return pairs
+
+
+def _kv_get(pairs, *keys):
+    for k in keys:
+        if pairs.get(k):
+            return pairs[k]
+    return ""
+
+
+def _kv_place(name, address):
+    """เลือกข้อความสถานที่ที่จะแปลง: ชื่อสถานที่ก่อน (ตัดที่อยู่ออก) ถ้าไม่ตรงอะไรค่อยรวมที่อยู่ช่วย"""
+    name = (name or "").strip()
+    address = (address or "").strip()
+    if not name and not address:
+        return "-"
+    short = re.split(r'\s\d', name)[0].strip() or name
+    if parse_location_rule_based(short) != short:
+        return short
+    return f"{name} {address}".strip()
+
+
+def _parse_kv(raw_text):
+    lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
+    pairs = _kv_pairs(raw_text)
+
+    job_id = ""
+    if lines and _JOB_CODE_RE.match(lines[0]):
+        job_id = lines[0].upper()
+    elif lines and _JOB_CODE_RE.match(lines[-1]):
+        job_id = lines[-1].upper()
+
+    date_raw = _kv_get(pairs, "date request", "date", "pick up date")
+    date_val = _norm_date(date_raw) or "-"
+    if date_val == "-" and date_raw:
+        for fmt in ("%d %b %Y", "%d %B %Y"):
+            try:
+                date_val = datetime.datetime.strptime(date_raw, fmt).strftime("%d/%m/%Y")
+                break
+            except ValueError:
+                pass
+
+    time_raw = _kv_get(pairs, "pick up time", "pickup time", "time request", "time")
+    time_val = "-"
+    tm = re.search(r'(\d{1,2})[:.](\d{2})', time_raw)
+    if tm:
+        hour = int(tm.group(1))
+        if re.search(r'PM', time_raw, re.IGNORECASE) and hour < 12:
+            hour += 12
+        time_val = f"{hour:02d}:{tm.group(2)}"
+
+    flight = re.sub(r'[^A-Za-z0-9]', '', _kv_get(pairs, "flight number", "flight")).upper() or "-"
+
+    pickup_raw = _kv_place(_kv_get(pairs, "pick up location", "pickup location"),
+                           _kv_get(pairs, "pick up address", "pickup address"))
+    dropoff_raw = _kv_place(_kv_get(pairs, "drop off location", "dropoff location"),
+                            _kv_get(pairs, "drop off address", "dropoff address"))
+
+    car_info = None
+    for key in ("participant", "package", "car type"):
+        car_info = match_car(pairs.get(key, ""))
+        if car_info:
+            break
+
+    return {
+        "id": job_id,
+        "date": date_val,
+        "time": time_val,
+        "flight": flight,
+        "pickup_raw": pickup_raw,
+        "dropoff_raw": dropoff_raw,
+        "car_info": car_info,
+        "order": _kv_get(pairs, "booking reference id", "booking id") or "-",
     }
 
 
@@ -666,7 +758,12 @@ def parse_job_text(raw_text, fallback_id="F01"):
     if not raw_text:
         return {}
 
-    fields = _parse_voucher(raw_text) if is_voucher_format(raw_text) else _parse_legacy(raw_text)
+    if is_kv_format(raw_text):
+        fields = _parse_kv(raw_text)
+    elif is_voucher_format(raw_text):
+        fields = _parse_voucher(raw_text)
+    else:
+        fields = _parse_legacy(raw_text)
     job_id = fields["id"] or fallback_id
     time_val = _norm_time(fields["time"])
     flight_val = fields["flight"]
@@ -929,6 +1026,13 @@ def process_batch_jobs():
             d = _norm_job_date(j.get("date"))
             if d not in list_dates:
                 list_dates.append(d)
+        # รายการย่อ: ไม่เอาของวันที่ผ่านมาแล้ว (ตามเวลาไทย) ถ้ามีงานของวันนี้ให้ส่งของพรุ่งนี้ต่อท้ายด้วย
+        today = now_th()
+        today_str = today.strftime("%d/%m/%Y")
+        tomorrow_str = (today + datetime.timedelta(days=1)).strftime("%d/%m/%Y")
+        list_dates = [d for d in list_dates if _date_sort_key(d) >= _date_sort_key(today_str)]
+        if today_str in list_dates and tomorrow_str not in list_dates:
+            list_dates.append(tomorrow_str)
         target_sender_id = last_sender_id
         reply = last_reply
         last_reply = None
@@ -1067,7 +1171,8 @@ def handle_message(event):
             _remember_reply(event.reply_token, chat_id)
         return
 
-    if "【客户订单号】" not in received_text and not is_voucher_format(received_text):
+    if ("【客户订单号】" not in received_text and not is_voucher_format(received_text)
+            and not is_kv_format(received_text)):
         print("ℹ️ ไม่ใช่ใบงาน (ไม่มี 【客户订单号】 หรือบรรทัด ชูป้าย)")
         return
 
