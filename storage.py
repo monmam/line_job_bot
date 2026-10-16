@@ -156,6 +156,48 @@ def set(key, value):
     return True
 
 
+
+# ---------------- ตารางอื่นๆ (เช่น jobs) ----------------
+def _table_endpoint(table):
+    return f"{SUPABASE_URL}/rest/v1/{table}"
+
+
+def upsert_rows(table, rows, on_conflict):
+    """เพิ่ม/อัปเดตหลายแถวในตาราง (ใช้เฉพาะ Supabase) ถ้าไม่ได้ใช้ Supabase จะไม่ทำอะไร"""
+    if not rows or not using_supabase():
+        return False
+    if config_problem():
+        raise StorageError(config_problem())
+    try:
+        r = requests.post(
+            _table_endpoint(table),
+            headers=_headers({"Prefer": "resolution=merge-duplicates,return=minimal"}),
+            params={"on_conflict": on_conflict},
+            data=json.dumps(rows, ensure_ascii=False).encode("utf-8"),
+            timeout=TIMEOUT,
+        )
+    except requests.RequestException as e:
+        raise StorageError(f"เชื่อมต่อ Supabase ไม่ได้: {e}")
+    if r.status_code not in (200, 201, 204):
+        raise StorageError(f"Supabase ({table}) ตอบกลับ {r.status_code}: {r.text[:200]}")
+    return True
+
+
+def select_rows(table, params):
+    """อ่านแถวจากตาราง คืน list (ว่างถ้าไม่ได้ใช้ Supabase)"""
+    if not using_supabase():
+        return []
+    if config_problem():
+        raise StorageError(config_problem())
+    try:
+        r = requests.get(_table_endpoint(table), headers=_headers(), params=params, timeout=TIMEOUT)
+    except requests.RequestException as e:
+        raise StorageError(f"เชื่อมต่อ Supabase ไม่ได้: {e}")
+    if r.status_code != 200:
+        raise StorageError(f"Supabase ({table}) ตอบกลับ {r.status_code}: {r.text[:200]}")
+    return r.json()
+
+
 def health():
     """เช็คว่าที่เก็บข้อมูลใช้งานได้ไหม คืน (ok, ข้อความ)"""
     problem = config_problem()
