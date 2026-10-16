@@ -496,7 +496,7 @@ def history_dates():
         return _history_dates_cache["dates"]
     try:
         rows = storage.select_rows("jobs", {"select": "job_date", "order": "job_date.desc", "limit": "3000"})
-    except storage.StorageError:
+    except Exception:  # ตาราง jobs ยังไม่พร้อม / storage.py เก่า: ข้ามไป ใช้เฉพาะข้อมูลในระบบ
         return _history_dates_cache["dates"]
     seen = []
     for r in rows:
@@ -1371,6 +1371,53 @@ def cancel_job(text, sender_id=None):
     return True, {"id": job_id, "cancelled": True}
 
 
+_UPDATE_RE = re.compile(r'^\s*(?:update|อัป?เดท|อัป?เดต)\s*(.*?)\s*$', re.IGNORECASE)
+
+
+def parse_update_date(text):
+    """วันที่ในคำสั่ง Update: '' / วันนี้ = วันนี้, พรุ่งนี้, 17, 17/10, 17/10/2026 (ไม่ระบุเดือน/ปี ใช้ของวันนี้) คืน dd/mm/yyyy หรือ None"""
+    text = (text or "").strip().lower()
+    now = now_th()
+    if text in ("", "วันนี้", "today"):
+        return now.strftime("%d/%m/%Y")
+    if text in ("พรุ่งนี้", "tomorrow"):
+        return (now + datetime.timedelta(days=1)).strftime("%d/%m/%Y")
+    m = re.match(r'^(\d{1,2})(?:[/\-.](\d{1,2}))?(?:[/\-.](\d{2,4}))?$', text)
+    if not m:
+        return None
+    day = int(m.group(1))
+    month = int(m.group(2)) if m.group(2) else now.month
+    year = int(m.group(3)) if m.group(3) else now.year
+    if year < 100:
+        year += 2000
+    if year > 2400:  # พ.ศ.
+        year -= 543
+    try:
+        return datetime.date(year, month, day).strftime("%d/%m/%Y")
+    except ValueError:
+        return None
+
+
+def jobs_for_date(date):
+    """ใบงานของวันนั้น (ไม่ซ้ำ) จากระบบ ถ้าไม่มีลองอ่านจากตาราง jobs (ใบงานเก่า)"""
+    seen, out = set(), []
+    with state_lock:
+        for j in latest_jobs:
+            if j.get("status") == "ยกเลิก" or _norm_job_date(j.get("date")) != date:
+                continue
+            k = _job_key(j)
+            if k not in seen:
+                seen.add(k)
+                out.append(j)
+    if not out and storage.using_supabase() and _iso_date(date):
+        try:
+            rows = storage.select_rows("jobs", {"job_date": f"eq.{_iso_date(date)}", "select": "*", "limit": "1000"})
+            out = _rows_to_jobs(rows)
+        except Exception as e:
+            print(f"⚠️ อ่านตาราง jobs ไม่สำเร็จ: {e}")
+    return out
+
+
 def _date_sort_key(d):
     for fmt in ("%d/%m/%Y", "%Y/%m/%d", "%d/%m/%y"):
         try:
@@ -1589,6 +1636,18 @@ def handle_message(event):
             _remember_reply(event.reply_token, chat_id)
         return
 
+    # "Update 17/10" -> ตอบเฉพาะตารางสรุปย่อของวันนั้น (ใช้ reply ไม่เสียโควต้า ไม่ส่งเข้ากลุ่มอื่น)
+    um = _UPDATE_RE.match(received_text)
+    if um:
+        date = parse_update_date(um.group(1))
+        if date is None:
+            reply = "รูปแบบ: Update 17 หรือ Update 17/10 หรือ Update 17/10/2026 (พิมพ์ Update เฉย ๆ = วันนี้)"
+        else:
+            reply = generate_compact_list(sorted(jobs_for_date(date), key=_id_sort_key)) or f"ไม่มีใบงานวันที่ {date}"
+        print(f"📋 Update {date or um.group(1)!r}")
+        _reply_text(configuration, event.reply_token, reply[:4900])
+        return
+
     ret = parse_return_command(received_text)
     if ret:
         ok, result = return_plate(*ret, sender_id=user_id)
@@ -1707,7 +1766,7 @@ def api_records():
         try:
             rows = storage.select_rows("jobs", {"job_date": f"eq.{_iso_date(date)}", "select": "*", "limit": "1000"})
             full = sorted(_rows_to_jobs(rows), key=_id_sort_key)
-        except storage.StorageError as e:
+        except Exception as e:
             print(f"⚠️ อ่านตาราง jobs ไม่สำเร็จ: {e}")
     return jsonify({
         "date": date, "today": today, "dates": dates,
