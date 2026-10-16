@@ -58,6 +58,49 @@ def push_with_fallback(to, messages, label):
             print(f"❌ ส่งไปยัง {label} ด้วย {bot_name} ล้มเหลว ({status}): {body}")
     return False
 
+
+def _reply_text(conf, reply_token, text):
+    try:
+        with ApiClient(conf) as api_client:
+            MessagingApi(api_client).reply_message(
+                ReplyMessageRequest(reply_token=reply_token, messages=[TextMessage(text=text)]))
+    except Exception as e:
+        print(f"⚠️ ตอบกลับไม่ได้: {e}")
+
+
+# บอทสำรองรับคำสั่ง "id" ในกลุ่มได้ด้วย (ตอบ Group ID) ต้องตั้ง Webhook URL ของบอทสำรองเป็น /callback เหมือนบอทหลัก
+# และใส่ Channel secret ของบอทสำรองใน Render: LINE_BACKUP_SECRETS=secretบอท2,secretบอท3 (เรียงตรงกับ LINE_BACKUP_TOKENS)
+def _make_backup_handler(secret, conf, name):
+    h = WebhookHandler(secret)
+
+    @h.add(MessageEvent, message=TextMessageContent)
+    def _on_message(event):
+        src = event.source
+        if event.message.text.strip().lower() == "id" and src.type in ("group", "room"):
+            cid = getattr(src, 'group_id', None) or getattr(src, 'room_id', None)
+            print(f"🆔 {name} ตอบ ID ของ {src.type}: {cid}")
+            _reply_text(conf, event.reply_token, str(cid))
+
+    @h.add(JoinEvent)
+    def _on_join(event):
+        src = event.source
+        print(f"➕ {name} ถูกเชิญเข้า {src.type}: {getattr(src, 'group_id', None) or getattr(src, 'room_id', None)}")
+
+    @h.add(LeaveEvent)
+    def _on_leave(event):
+        src = event.source
+        print(f"➖ {name} ถูกนำออกจาก {src.type}: {getattr(src, 'group_id', None) or getattr(src, 'room_id', None)}")
+
+    return h
+
+
+_backup_secrets = [x.strip() for x in os.getenv("LINE_BACKUP_SECRETS", "").split(",")]
+BACKUP_HANDLERS = [
+    _make_backup_handler(_backup_secrets[i], conf, f"บอทสำรอง {i + 1}")
+    for i, conf in enumerate(BACKUP_CONFIGURATIONS)
+    if i < len(_backup_secrets) and _backup_secrets[i]
+]
+
 # เวลาไทย (เซิร์ฟเวอร์ Render ใช้เวลา UTC)
 TH_TZ = datetime.timezone(datetime.timedelta(hours=7))
 
@@ -1407,10 +1450,18 @@ def callback():
 
     try:
         handler.handle(body, signature)
+        return 'OK'
     except InvalidSignatureError:
-        print("❌ ลายเซ็น LINE ไม่ถูกต้อง: เช็ค LINE_CHANNEL_SECRET ใน Render ให้ตรงกับ Channel ที่ตั้ง Webhook")
-        abort(400)
-    return 'OK'
+        pass
+    # ลายเซ็นไม่ตรงบอทหลัก: ลองบอทสำรอง (ใช้ตอบคำสั่ง id ในกลุ่ม)
+    for bh in BACKUP_HANDLERS:
+        try:
+            bh.handle(body, signature)
+            return 'OK'
+        except InvalidSignatureError:
+            continue
+    print("❌ ลายเซ็น LINE ไม่ถูกต้อง: เช็ค LINE_CHANNEL_SECRET (และ LINE_BACKUP_SECRETS) ใน Render ให้ตรงกับ Channel ที่ตั้ง Webhook")
+    abort(400)
 
 
 @app.route("/api/get_sheets_data", methods=["GET"])
