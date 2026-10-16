@@ -535,7 +535,10 @@ def persist_state():
         except storage.StorageError as e:
             _logs_dirty = True
             print(f"⚠️ บันทึกประวัติไม่สำเร็จ: {e}")
-    sync_jobs_table(job_rows)
+    try:
+        sync_jobs_table(job_rows)
+    except Exception as e:  # ตาราง jobs เป็นของเสริม ห้ามทำให้ระบบหลักล้ม (เช่น อัป storage.py ไม่ครบ)
+        print(f"⚠️ บันทึกตาราง jobs ไม่สำเร็จ: {e} (เช็คว่าอัป storage.py ล่าสุดขึ้น Render แล้ว)")
 
 
 def restore_state():
@@ -1886,7 +1889,10 @@ def _keep_alive_loop(url):
 def _start_background():
     load_settings()
     restore_state()
-    persist_state()  # เขียนใบงานที่กู้คืนมาลงตาราง jobs ทันที (ย้ายข้อมูลเก่าเข้าตารางใหม่)
+    try:
+        persist_state()  # เขียนใบงานที่กู้คืนมาลงตาราง jobs ทันที (ย้ายข้อมูลเก่าเข้าตารางใหม่)
+    except Exception as e:
+        print(f"⚠️ บันทึกสถานะตอนเริ่มระบบไม่สำเร็จ: {e}")
     base = os.getenv("KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL")
     if base and os.getenv("KEEP_ALIVE", "1") != "0":
         url = base.rstrip("/") + "/health"
