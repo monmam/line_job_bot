@@ -118,7 +118,12 @@ latest_jobs = []
 last_sender_id = None
 last_reply = None  # {"token", "chat_id"} reply token ล่าสุด ใช้ตอบกลับแชทนั้นฟรี (ไม่นับโควต้า push)
 pending_update_dates = []  # วันที่ที่มีการอัปเดตป้ายทะเบียน รอส่งใบสรุปของวันนั้นใหม่
-MAX_HISTORY = 100
+MAX_HISTORY = 1000     # จำนวนใบงานสูงสุดที่เก็บในประวัติ
+KEEP_DAYS = 14         # เก็บใบงานย้อนหลังกี่วัน (ใบงานที่วันที่เก่ากว่านี้จะถูกตัดออก)
+LOG_CAP = {"activity": 1000, "sent": 300}
+_activity_log = []     # บันทึกเหตุการณ์: รับใบงาน / แก้ไข / ซ้ำ / ป้ายทะเบียน / คืน / ยกเลิก
+_sent_log = []         # บันทึกการส่ง: ใบสรุป / รายการย่อ พร้อมปลายทางและผลลัพธ์
+_logs_dirty = False
 
 # ค่าเริ่มต้นพจนานุกรมรายชื่อถนนหลัก (อังกฤษ = ไทย)
 DEFAULT_MAIN_ROADS_DICT = {
@@ -350,6 +355,67 @@ def save_settings(data):
 
 
 # ====================== บันทึก/โหลด คิวใบงาน ======================
+
+# ====================== ระบบเก็บข้อมูลใบงาน (ใบเต็ม / ใบย่อ / คืน / ยกเลิก / ประวัติ) ======================
+# ใบงานแต่ละใบ (job) เก็บ: ข้อความเต็ม (text) สรุปปัจจุบัน (formatted_summary) สถานะส่ง (status)
+#   state = normal | returned (📌) | cancelled (❌CANCEL❌), plate, events (ประวัติของใบงานนั้น)
+# ประวัติรวมเก็บแยก 2 ชุด: activity_log (เหตุการณ์) และ sent_log (การส่ง) ทั้งหมดบันทึกลง Supabase
+def _ts():
+    return now_th().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def log_activity(kind, job=None, detail=""):
+    global _logs_dirty
+    job = job or {}
+    with state_lock:
+        _activity_log.append({
+            "ts": _ts(), "type": kind, "id": job.get("id", ""),
+            "date": _norm_job_date(job.get("date")) if job.get("date") else "",
+            "order": job.get("order", ""), "detail": detail,
+        })
+        del _activity_log[:-LOG_CAP["activity"]]
+        _logs_dirty = True
+
+
+def log_sent(kind, text, dates, results):
+    """results = [(ปลายทาง, สำเร็จไหม, reply/push)]"""
+    global _logs_dirty
+    with state_lock:
+        _sent_log.append({
+            "ts": _ts(), "kind": kind, "text": text, "dates": list(dates),
+            "targets": [{"to": t, "ok": bool(ok), "via": via} for t, ok, via in results],
+        })
+        del _sent_log[:-LOG_CAP["sent"]]
+        _logs_dirty = True
+
+
+def mark_job(job, kind, detail=""):
+    """บันทึกเหตุการณ์ลงใบงาน + ประวัติรวม kind: new | amend | plate | return | cancel"""
+    job.setdefault("events", []).append({"ts": _ts(), "type": kind, "detail": detail})
+    if kind == "return":
+        job["state"] = "returned"
+    elif kind == "cancel":
+        job["state"] = "cancelled"
+    log_activity(kind, job, detail)
+
+
+def _job_state(job):
+    if job.get("state"):
+        return job["state"]
+    if job.get("cancelled"):
+        return "cancelled"
+    return "returned" if job.get("plate") == "📌" else "normal"
+
+
+def _prune_jobs():
+    """ตัดใบงานที่วันที่เก่าเกิน KEEP_DAYS วัน (ไม่ตัดใบที่ยังรอส่งในคิว) และจำกัดจำนวนไม่เกิน MAX_HISTORY"""
+    global latest_jobs
+    cutoff = _date_sort_key((now_th() - datetime.timedelta(days=KEEP_DAYS)).strftime("%d/%m/%Y"))
+    queued = {id(j) for j in job_queue}
+    latest_jobs = [j for j in latest_jobs
+                   if id(j) in queued or _date_sort_key(_norm_job_date(j.get("date"))) >= cutoff][:MAX_HISTORY]
+
+
 def persist_state():
     """บันทึกคิว + ประวัติใบงานลง Supabase (กันข้อมูลหายตอนเซิร์ฟเวอร์หลับ)"""
     with state_lock:
@@ -365,6 +431,18 @@ def persist_state():
     except storage.StorageError as e:
         print(f"⚠️ บันทึกคิวใบงานไม่สำเร็จ: {e}")
 
+    global _logs_dirty
+    with state_lock:
+        dirty, activity, sent = _logs_dirty, list(_activity_log), list(_sent_log)
+        _logs_dirty = False
+    if dirty:
+        try:
+            storage.set("activity_log", activity)
+            storage.set("sent_log", sent)
+        except storage.StorageError as e:
+            _logs_dirty = True
+            print(f"⚠️ บันทึกประวัติไม่สำเร็จ: {e}")
+
 
 def restore_state():
     """โหลดคิวที่ค้างอยู่กลับมา และเริ่มนับเวลาต่อ"""
@@ -374,6 +452,12 @@ def restore_state():
     except storage.StorageError as e:
         print(f"⚠️ โหลดคิวใบงานไม่สำเร็จ: {e}")
         return
+    try:
+        with state_lock:
+            _activity_log[:] = storage.get("activity_log") or []
+            _sent_log[:] = storage.get("sent_log") or []
+    except storage.StorageError as e:
+        print(f"⚠️ โหลดประวัติไม่สำเร็จ: {e}")
     if not snap:
         return
     with state_lock:
@@ -975,6 +1059,7 @@ def add_job_to_queue(text, sender_id=None):
         # กันใบงานซ้ำ (เช่น LINE ส่ง webhook ซ้ำ หรือกดส่งซ้ำ)
         key = _job_key(job_item)
         if any(_job_key(j) == key for j in job_queue):
+            log_activity("duplicate", job_item, "พบใบงานซ้ำในคิว (ไม่รับ)")
             return False, "พบใบงานซ้ำในคิว (Order เดียวกัน)"
 
         # เคยรับใบงานนี้แล้ว (Order เดียวกัน): ส่งซ้ำข้อความเดิมเป๊ะ = ไม่รับ ถ้าแก้ไขแล้ว = รับ แต่คงป้ายทะเบียน/📌 เดิมไว้
@@ -982,17 +1067,26 @@ def add_job_to_queue(text, sender_id=None):
                      if _job_key(j) == key and j.get("status") != "ยกเลิก"), None)
         if prev:
             if prev.get("raw_text") == text and prev.get("status") == "ส่งแล้ว":
+                log_activity("duplicate", prev, "ส่งข้อความเดิมซ้ำ (ไม่รับ)")
                 return False, "ใบงานนี้ส่งไปแล้ว (ข้อความเดิมซ้ำ)"
             if prev.get("plate"):
                 job_item["plate"] = prev["plate"]
                 job_item["formatted_summary"] = apply_plate(job_item["formatted_summary"], prev["plate"])
+            job_item["state"] = _job_state(prev)
+            if job_item["state"] == "cancelled":
+                job_item["cancelled"] = True
+                job_item["formatted_summary"] = f"{job_item['id']} ❌CANCEL❌"
+            job_item["events"] = list(prev.get("events", []))
+            latest_jobs = [j for j in latest_jobs if j is not prev]  # ใบงานแก้ไข: แทนที่ใบเดิม ไม่ให้ซ้ำในรายการ
+        job_item.setdefault("state", "normal")
 
         job_queue.append(job_item)
         if sender_id:
             last_sender_id = sender_id
 
         latest_jobs.insert(0, job_item)
-        latest_jobs = latest_jobs[:MAX_HISTORY]
+        mark_job(job_item, "amend" if prev else "new", "ใบงานแก้ไข" if prev else "รับใบงานใหม่")
+        _prune_jobs()
 
         _ensure_timer()
 
@@ -1032,6 +1126,7 @@ def update_plate(text, plate, sender_id=None):
             for job in matches:
                 job["plate"] = plate
                 job["formatted_summary"] = apply_plate(job["formatted_summary"], plate)
+                mark_job(job, "return" if plate == RETURN_MARK else "plate", plate)
                 if id(job) not in queued_keys and job.get("status") != "รอส่ง":
                     only_queued = False
             # ใบงานที่ส่งไปแล้ว -> ส่งใบสรุปของวันนั้นใหม่พร้อมป้ายทะเบียน
@@ -1053,6 +1148,7 @@ def update_plate(text, plate, sender_id=None):
         with state_lock:
             result["plate"] = plate
             result["formatted_summary"] = apply_plate(result["formatted_summary"], plate)
+            mark_job(result, "return" if plate == RETURN_MARK else "plate", plate)
         persist_state()
         return True, result
 
@@ -1106,6 +1202,7 @@ def return_plate(job_id, day=None, month=None, year=None, sender_id=None):
         for job in matches:
             job["plate"] = RETURN_MARK
             job["formatted_summary"] = apply_plate(job["formatted_summary"], RETURN_MARK)
+            mark_job(job, "return", RETURN_MARK)
             if id(job) not in queued_keys and job.get("status") != "รอส่ง":
                 already_sent = True
         if already_sent:
@@ -1148,6 +1245,7 @@ def cancel_job(text, sender_id=None):
             for job in matches:
                 job["cancelled"] = True
                 job["formatted_summary"] = mark(job.get("id"))
+                mark_job(job, "cancel", "ยกเลิกงาน")
                 if id(job) not in queued_keys and job.get("status") != "รอส่ง":
                     already_sent = True
             job_id = matches[0].get("id")
@@ -1168,6 +1266,7 @@ def cancel_job(text, sender_id=None):
         with state_lock:
             result["cancelled"] = True
             result["formatted_summary"] = mark(result["id"])
+            mark_job(result, "cancel", "ยกเลิกงาน (ไม่พบใบงานเดิม)")
         persist_state()
         return True, result
 
@@ -1301,6 +1400,7 @@ def process_batch_jobs():
             # ข้อความเพิ่มเติม: รายการย่อของใบงานทั้งวัน (เฉพาะบรรทัดแรกของแต่ละใบงาน)
             if list_text:
                 chunks.append(list_text[:4900])
+            results = []
             for label, to in targets:
                 messages = [TextMessage(text=c) for c in chunks]
                 # แชทที่ส่งใบงานมา: ตอบด้วย reply ก่อน (ฟรี) ถ้าไม่ได้ค่อยใช้ push
@@ -1310,10 +1410,16 @@ def process_batch_jobs():
                         with ApiClient(configuration) as api_client:
                             MessagingApi(api_client).reply_message(
                                 ReplyMessageRequest(reply_token=token, messages=messages))
+                        results.append((label, True, "reply"))
                         continue
                     except Exception as e:
                         print(f"⚠️ ตอบกลับ {label} ด้วย reply ไม่ได้ ลองใช้ push แทน: {e}")
-                push_with_fallback(to, messages, label)
+                results.append((label, push_with_fallback(to, messages, label), "push"))
+
+            if summary_text:
+                log_sent("summary", summary_text, sorted({_norm_job_date(j.get("date")) for j in to_send}), results)
+            if list_text:
+                log_sent("compact", list_text, list_dates, results)
 
             if GOOGLE_SPREADSHEET_ID and jobs:
                 try:
@@ -1329,6 +1435,7 @@ def process_batch_jobs():
             for job in latest_jobs:
                 if (_job_key(job), job.get("id")) in sent_keys:
                     job["status"] = "ส่งแล้ว"
+            _prune_jobs()
         persist_state()
 
 
@@ -1468,12 +1575,67 @@ def api_status():
         "time_left_seconds": time_left,
         "max_wait_seconds": wait_seconds,
         "latest_jobs": jobs_copy,
+        "today_stats": _today_stats(),
         "custom_keywords": settings.get("custom_keywords", []),
         "line_groups": settings.get("line_groups", []),
         "main_roads_dict": settings.get("main_roads_dict", DEFAULT_MAIN_ROADS_DICT),
         "major_areas_dict": settings.get("major_areas_dict", DEFAULT_MAJOR_AREAS_DICT),
         "settings": settings
     })
+
+
+@app.route("/api/records", methods=["GET"])
+def api_records():
+    """ข้อมูลใบงานแบบเป็นระบบ แยกตามวันที่: ใบเต็ม / ใบย่อ / คืนงาน / ยกเลิกงาน / ประวัติเหตุการณ์ / ประวัติการส่ง"""
+    today = now_th().strftime("%d/%m/%Y")
+    date = _norm_job_date(request.args.get("date") or today)
+    with state_lock:
+        jobs, seen = [], set()
+        for j in latest_jobs:  # ใหม่สุดก่อน ใบซ้ำเอาอันล่าสุด
+            if j.get("status") == "ยกเลิก":
+                continue
+            item = dict(j)
+            item["date"] = _norm_job_date(j.get("date"))
+            k = (item["date"], _job_key(j))
+            if k in seen:
+                continue
+            seen.add(k)
+            item["state"] = _job_state(j)
+            jobs.append(item)
+        activity, sent = list(_activity_log), list(_sent_log)
+
+    dates = sorted({j["date"] for j in jobs} | {today}, key=_date_sort_key, reverse=True)
+    full = sorted([j for j in jobs if j["date"] == date], key=_id_sort_key)
+    return jsonify({
+        "date": date, "today": today, "dates": dates,
+        "full": full,
+        "compact": generate_compact_list(full) if full else "",
+        "returns": [j for j in full if j["state"] == "returned"],
+        "cancels": [j for j in full if j["state"] == "cancelled"],
+        "activity": [a for a in reversed(activity) if a.get("date") == date][:200],
+        "sent": [x for x in reversed(sent) if date in x.get("dates", [])][:50],
+    })
+
+
+def _today_stats():
+    today = now_th().strftime("%d/%m/%Y")
+    with state_lock:
+        seen, rows = set(), []
+        for j in latest_jobs:
+            if j.get("status") == "ยกเลิก" or _norm_job_date(j.get("date")) != today:
+                continue
+            k = _job_key(j)
+            if k in seen:
+                continue
+            seen.add(k)
+            rows.append(j)
+    states = [_job_state(j) for j in rows]
+    return {
+        "date": today, "total": len(rows),
+        "sent": sum(1 for j in rows if j.get("status") == "ส่งแล้ว"),
+        "waiting": sum(1 for j in rows if j.get("status") == "รอส่ง"),
+        "returned": states.count("returned"), "cancelled": states.count("cancelled"),
+    }
 
 
 _sheets_health_cache = {"at": 0, "ok": False}
