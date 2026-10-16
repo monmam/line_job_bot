@@ -428,7 +428,8 @@ def parse_location_rule_based(raw_location):
             return target
 
     # 1. สนามบินดอนเมือง
-    if any(k in upper_loc for k in ["DMK", "DON MUEANG", "ดอนเมือง", "แอร์ดอน"]):
+    air_loc = re.sub(r"(?:KHET|KHWAENG|DISTRICT)\s+DON\s+MUEANG|(?:เขต|แขวง)ดอนเมือง", "", upper_loc)
+    if any(k in air_loc for k in ["DMK", "DON MUEANG", "ดอนเมือง", "แอร์ดอน"]):
         return "แอร์ดอน"
 
     # 2. สนามบินสุวรรณภูมิ
@@ -589,7 +590,7 @@ def _parse_voucher(raw_text):
     }
 
 
-_KV_ORDER_RE = re.compile(r'^\s*(?:Booking Reference ID|Booking ID)\s*[:：]', re.IGNORECASE | re.MULTILINE)
+_KV_ORDER_RE = re.compile(r'^\s*(?:Booking Reference ID|Booking Reference Number|Booking ID)\s*[:：]', re.IGNORECASE | re.MULTILINE)
 
 
 def is_kv_format(raw_text):
@@ -636,7 +637,7 @@ def _parse_kv(raw_text):
     elif lines and _JOB_CODE_RE.match(lines[-1]):
         job_id = lines[-1].upper()
 
-    date_raw = _kv_get(pairs, "date request", "date", "pick up date")
+    date_raw = _kv_get(pairs, "date request", "date of use", "date", "pick up date")
     date_val = _norm_date(date_raw) or "-"
     if date_val == "-" and date_raw:
         for fmt in ("%d %b %Y", "%d %B %Y"):
@@ -655,15 +656,27 @@ def _parse_kv(raw_text):
             hour += 12
         time_val = f"{hour:02d}:{tm.group(2)}"
 
-    flight = re.sub(r'[^A-Za-z0-9]', '', _kv_get(pairs, "flight number", "flight")).upper() or "-"
+    flight_raw = _kv_get(pairs, "flight number", "flight no", "flight")
+    if not flight_raw:  # บรรทัดแบบ "Flight no.  EK385" (ไม่มี :)
+        fm = re.search(r'^\s*flight\s*(?:no\.?|number)?\s*[:：]?\s*([A-Za-z0-9][A-Za-z0-9 \-]*)$',
+                       raw_text, re.IGNORECASE | re.MULTILINE)
+        flight_raw = fm.group(1) if fm else ""
+    flight = re.sub(r'[^A-Za-z0-9]', '', flight_raw).upper() or "-"
 
     pickup_raw = _kv_place(_kv_get(pairs, "pick up location", "pickup location"),
                            _kv_get(pairs, "pick up address", "pickup address"))
     dropoff_raw = _kv_place(_kv_get(pairs, "drop off location", "dropoff location"),
                             _kv_get(pairs, "drop off address", "dropoff address"))
+    if pairs.get("hotel name"):  # แบบ Airport to Hotel / Hotel to Airport
+        airport = _kv_get(pairs, "airport of arrival", "airport of departure", "airport")
+        hotel = _kv_place(pairs["hotel name"], _kv_get(pairs, "address"))
+        if re.search(r'hotel\s*to\s*airport', raw_text, re.IGNORECASE):
+            pickup_raw, dropoff_raw = hotel, airport or "-"
+        else:
+            pickup_raw, dropoff_raw = airport or "-", hotel
 
     car_info = None
-    for key in ("participant", "package", "car type"):
+    for key in ("participant", "package", "car type", "vehicle"):
         car_info = match_car(pairs.get(key, ""))
         if car_info:
             break
@@ -676,7 +689,75 @@ def _parse_kv(raw_text):
         "pickup_raw": pickup_raw,
         "dropoff_raw": dropoff_raw,
         "car_info": car_info,
-        "order": _kv_get(pairs, "booking reference id", "booking id") or "-",
+        "order": _kv_get(pairs, "booking reference id", "booking reference number", "booking id") or "-",
+    }
+
+
+_WEEKDAY_DATE_RE = re.compile(r'^(?:[A-Za-z]+,\s*)?(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})$')
+_ROUTE_LINE_RE = re.compile(r'^[A-Za-z]{3}\s*-\s*[A-Za-z ]+$')
+_FLIGHT_SPACED_RE = re.compile(r'^([A-Za-z0-9]{2})\s*-\s*(\d{1,4})$')
+
+
+def is_plain_format(raw_text):
+    """ใบงานแบบไม่มีหัวข้อ: บรรทัดสุดท้ายเป็นรหัสงาน และมีบรรทัดวันที่ เช่น 'Saturday, 17 Oct 2026'"""
+    if "【" in raw_text:
+        return False
+    lines = [ln.strip() for ln in raw_text.splitlines() if ln.strip()]
+    return (len(lines) >= 8 and bool(_JOB_CODE_RE.match(lines[-1]))
+            and any(_WEEKDAY_DATE_RE.match(ln) for ln in lines))
+
+
+def _short_name(text):
+    """ชื่อสถานที่แบบสั้น: ตัดวงเล็บ ที่อยู่ และตัวเลขท้ายออก"""
+    text = text.split("(")[0]
+    return re.split(r',|\s\d', text)[0].strip() or text.strip()
+
+
+def _parse_plain(raw_text):
+    lines = [ln.strip().strip(_QUOTES).strip() for ln in raw_text.splitlines()]
+    lines = [ln for ln in lines if ln]
+    job_id = lines[-1].upper()
+
+    date_idx = next(i for i, ln in enumerate(lines) if _WEEKDAY_DATE_RE.match(ln))
+    dm = _WEEKDAY_DATE_RE.match(lines[date_idx])
+    date_val = "-"
+    for fmt in ("%d %b %Y", "%d %B %Y"):
+        try:
+            date_val = datetime.datetime.strptime(f"{dm.group(1)} {dm.group(2)} {dm.group(3)}", fmt).strftime("%d/%m/%Y")
+            break
+        except ValueError:
+            pass
+
+    time_val = "-"
+    if date_idx + 1 < len(lines) and _TIME_LINE_RE.match(lines[date_idx + 1]):
+        time_val = _norm_time(lines[date_idx + 1])
+
+    flight, flight_idx = "-", date_idx
+    if date_idx >= 1:
+        fm = _FLIGHT_SPACED_RE.match(lines[date_idx - 1]) or _FLIGHT_LINE_RE.match(lines[date_idx - 1])
+        if fm:
+            flight = re.sub(r'[\s-]+', '', lines[date_idx - 1]).upper()
+            flight_idx = date_idx - 1
+
+    # หลังบรรทัดเส้นทาง (BKK - Don Mueang) ถึงบรรทัดเที่ยวบิน: ข้อความที่ไม่ใช่ "-" = [จุดรับ, จุดส่ง]
+    route_idx = next((i for i, ln in enumerate(lines[:flight_idx]) if _ROUTE_LINE_RE.match(ln)), None)
+    places = []
+    if route_idx is not None:
+        places = [ln for ln in lines[route_idx + 1:flight_idx] if ln != "-"]
+    pickup_raw = places[0] if places else "-"
+    dropoff_raw = _short_name(places[1]) if len(places) > 1 else "-"
+    if pickup_raw != "-" and parse_location_rule_based(pickup_raw) == pickup_raw.strip():
+        pickup_raw = _short_name(pickup_raw)
+
+    car_info = match_car(lines[date_idx + 2]) if date_idx + 2 < len(lines) else None
+    if not car_info:
+        car_info = match_car("\n".join(lines[date_idx + 1:-1]))
+
+    order = next((ln for ln in lines[:1] if _ORDER_LINE_RE.match(ln)), "-")
+    return {
+        "id": job_id, "date": date_val, "time": time_val, "flight": flight,
+        "pickup_raw": pickup_raw, "dropoff_raw": dropoff_raw,
+        "car_info": car_info, "order": order,
     }
 
 
@@ -762,6 +843,8 @@ def parse_job_text(raw_text, fallback_id="F01"):
         fields = _parse_kv(raw_text)
     elif is_voucher_format(raw_text):
         fields = _parse_voucher(raw_text)
+    elif is_plain_format(raw_text):
+        fields = _parse_plain(raw_text)
     else:
         fields = _parse_legacy(raw_text)
     job_id = fields["id"] or fallback_id
@@ -851,6 +934,16 @@ def add_job_to_queue(text, sender_id=None):
         if any(_job_key(j) == key for j in job_queue):
             return False, "พบใบงานซ้ำในคิว (Order เดียวกัน)"
 
+        # เคยรับใบงานนี้แล้ว (Order เดียวกัน): ส่งซ้ำข้อความเดิมเป๊ะ = ไม่รับ ถ้าแก้ไขแล้ว = รับ แต่คงป้ายทะเบียน/📌 เดิมไว้
+        prev = next((j for j in latest_jobs
+                     if _job_key(j) == key and j.get("status") != "ยกเลิก"), None)
+        if prev:
+            if prev.get("raw_text") == text and prev.get("status") == "ส่งแล้ว":
+                return False, "ใบงานนี้ส่งไปแล้ว (ข้อความเดิมซ้ำ)"
+            if prev.get("plate"):
+                job_item["plate"] = prev["plate"]
+                job_item["formatted_summary"] = apply_plate(job_item["formatted_summary"], prev["plate"])
+
         job_queue.append(job_item)
         if sender_id:
             last_sender_id = sender_id
@@ -924,35 +1017,62 @@ def update_plate(text, plate, sender_id=None):
     return True, {"id": job_id, "plate": plate}
 
 
-_RETURN_RE = re.compile(r'^\s*([A-Za-z]+\d+)\s*คืน\s*$')
+_DATE_TOKEN = r'(\d{1,2})(?:[/\-.](\d{1,2}))?(?:[/\-.](\d{4}))?'
+# รูปแบบ: "F22 คืน", "F22 คืน 16", "F22 คืน 16/10", "F22 16/10 คืน"
+_RETURN_RE = re.compile(
+    r'^\s*([A-Za-z]+\d+)\s*(?:' + _DATE_TOKEN + r'\s*คืน|คืน(?:\s*' + _DATE_TOKEN + r')?)\s*$')
 RETURN_MARK = "📌"
+_RETURN_TICKET_RE = re.compile(r'^\s*📌\s*คืน[ \t]*\r?\n(.+)$', re.DOTALL)
 
 
-def return_plate(job_id, sender_id=None):
-    """พิมพ์ 'VK06 คืน' -> เปลี่ยนป้ายทะเบียนของ VK06 เป็น 📌 แล้วส่งรายการย่อของวันนั้นใหม่"""
+def parse_return_command(text):
+    """คืน (รหัสใบงาน, วัน, เดือน, ปี) หรือ None ถ้าไม่ใช่คำสั่งคืนป้าย (วัน/เดือน/ปี ว่างได้)"""
+    m = _RETURN_RE.match(text or "")
+    if not m:
+        return None
+    g = m.groups()
+    day, mon, year = next(((g[i], g[i + 1], g[i + 2]) for i in (1, 4) if g[i]), (None, None, None))
+    return g[0], day, mon, year
+
+
+def return_plate(job_id, day=None, month=None, year=None, sender_id=None):
+    """'VK06 คืน' -> เปลี่ยนป้ายของ VK06 เป็น 📌 แล้วส่งรายการย่อของวันนั้นใหม่
+    ถ้ารหัสเดียวกันมีหลายวัน ต้องระบุวันที่ (เช่น 'F22 คืน 16' หรือ 'F22 16/10 คืน') ไม่งั้นจะไม่แก้อะไร"""
     global last_sender_id
     job_id = job_id.strip().upper()
     with state_lock:
-        # ใหม่สุดก่อน: ใช้ใบงานล่าสุดของรหัสนั้น (ข้ามใบที่ยกเลิก)
         matches = [j for j in job_queue + latest_jobs
                    if str(j.get("id", "")).strip().upper() == job_id and j.get("status") != "ยกเลิก"]
+        if day:
+            def _same_day(j):
+                parts = _norm_job_date(j.get("date")).split("/")
+                if len(parts) != 3:
+                    return False
+                return (int(parts[0]) == int(day)
+                        and (not month or int(parts[1]) == int(month))
+                        and (not year or int(parts[2]) == int(year)))
+            matches = [j for j in matches if _same_day(j)]
         if not matches:
-            return False, f"ไม่พบใบงาน {job_id}"
-        target = matches[0]
+            return False, f"ไม่พบใบงาน {job_id}" + (f" ของวันที่ {day}" + (f"/{month}" if month else "") if day else "")
+        dates = sorted({_norm_job_date(j.get("date")) for j in matches}, key=_date_sort_key)
+        if len(dates) > 1:
+            return False, (f"{job_id} มีหลายวัน ({', '.join(dates)}) กรุณาระบุวัน เช่น "
+                           f"{job_id} คืน {dates[0][:2]}")
         queued_keys = {id(j) for j in job_queue}
+        already_sent = False
         for job in matches:
-            if _job_key(job) == _job_key(target):
-                job["plate"] = RETURN_MARK
-                job["formatted_summary"] = apply_plate(job["formatted_summary"], RETURN_MARK)
-        if id(target) not in queued_keys and target.get("status") != "รอส่ง":
-            d = _norm_job_date(target.get("date"))
-            if d not in pending_update_dates:
-                pending_update_dates.append(d)
+            job["plate"] = RETURN_MARK
+            job["formatted_summary"] = apply_plate(job["formatted_summary"], RETURN_MARK)
+            if id(job) not in queued_keys and job.get("status") != "รอส่ง":
+                already_sent = True
+        if already_sent:
+            if dates[0] not in pending_update_dates:
+                pending_update_dates.append(dates[0])
             if sender_id:
                 last_sender_id = sender_id
             _ensure_timer()
     persist_state()
-    return True, target
+    return True, {"id": job_id, "date": dates[0]}
 
 
 def _date_sort_key(d):
@@ -1156,12 +1276,29 @@ def handle_message(event):
     chat_id = (getattr(event.source, 'group_id', None) or getattr(event.source, 'room_id', None)
                or user_id)
 
-    m = _RETURN_RE.match(received_text)
-    if m:
-        ok, result = return_plate(m.group(1), sender_id=user_id)
-        print(f"📌 คืนป้าย {m.group(1).upper()}" if ok else f"⚠️ {result}")
+    # "📌คืน" + ใบงานเดิมทั้งใบ -> ค้นใบงานจากเลข Order แล้วเปลี่ยนป้ายเป็น 📌
+    rm = _RETURN_TICKET_RE.match(received_text)
+    if rm:
+        ok, result = update_plate(rm.group(1).strip(), RETURN_MARK, sender_id=user_id)
+        print(f"📌 คืนงานจากใบงาน {result['id']}" if ok else f"⚠️ คืนงานไม่สำเร็จ: {result}")
         if ok:
             _remember_reply(event.reply_token, chat_id)
+        return
+
+    ret = parse_return_command(received_text)
+    if ret:
+        ok, result = return_plate(*ret, sender_id=user_id)
+        if ok:
+            print(f"📌 คืนป้าย {result['id']} วันที่ {result['date']}")
+            _remember_reply(event.reply_token, chat_id)
+        else:
+            print(f"⚠️ {result}")
+            try:
+                with ApiClient(configuration) as api_client:
+                    MessagingApi(api_client).reply_message(ReplyMessageRequest(
+                        reply_token=event.reply_token, messages=[TextMessage(text=f"⚠️ {result}")]))
+            except Exception as e:
+                print(f"⚠️ ตอบกลับไม่ได้: {e}")
         return
 
     plate = extract_plate(received_text)
@@ -1172,7 +1309,7 @@ def handle_message(event):
         return
 
     if ("【客户订单号】" not in received_text and not is_voucher_format(received_text)
-            and not is_kv_format(received_text)):
+            and not is_kv_format(received_text) and not is_plain_format(received_text)):
         print("ℹ️ ไม่ใช่ใบงาน (ไม่มี 【客户订单号】 หรือบรรทัด ชูป้าย)")
         return
 
