@@ -416,6 +416,98 @@ def _prune_jobs():
                    if id(j) in queued or _date_sort_key(_norm_job_date(j.get("date"))) >= cutoff][:MAX_HISTORY]
 
 
+
+# ====================== ตาราง jobs ใน Supabase (1 แถว = 1 ใบงาน เก็บถาวร ค้นย้อนหลังได้) ======================
+_sync_lock = threading.Lock()
+_jobs_synced = {}       # uid -> ข้อมูลล่าสุดที่เขียนลงตารางแล้ว (เขียนซ้ำเฉพาะที่เปลี่ยน)
+_jobs_warn_last = ""
+_history_dates_cache = {"at": 0, "dates": []}
+
+
+def _iso_date(d):
+    try:
+        return datetime.datetime.strptime(d, "%d/%m/%Y").strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def _job_row(job):
+    d = _norm_job_date(job.get("date"))
+    return {
+        "uid": f"{d}|{_job_key(job)}",
+        "job_date": _iso_date(d), "job_code": str(job.get("id", "")), "job_time": str(job.get("time", "")),
+        "order_no": str(job.get("order", "")), "pickup": job.get("pickup", ""), "dropoff": job.get("dropoff", ""),
+        "flight": str(job.get("flight", "")), "car_code": str(job.get("car_code", "")), "price": str(job.get("price", "")),
+        "summary": job.get("formatted_summary", ""), "raw_text": job.get("text") or job.get("raw_text") or "",
+        "status": job.get("status", ""), "state": _job_state(job), "plate": job.get("plate") or "",
+        "events": job.get("events") or [], "received_at": job.get("received_at", ""),
+    }
+
+
+def sync_jobs_table(rows):
+    """เขียนใบงานที่เปลี่ยนไปลงตาราง jobs (ถ้าตารางยังไม่ได้สร้าง จะแจ้งเตือนใน log แต่ระบบยังทำงานต่อได้)"""
+    global _jobs_warn_last
+    if not storage.using_supabase() or not rows:
+        return
+    with _sync_lock:
+        changed = {}
+        for r in rows:  # ใบงานซ้ำ uid เดียวกัน เอาอันแรก (ใหม่สุด)
+            uid = r["uid"]
+            if uid in changed:
+                continue
+            blob = json.dumps(r, sort_keys=True, ensure_ascii=False)
+            if _jobs_synced.get(uid) != blob:
+                changed[uid] = (r, blob)
+        if not changed:
+            return
+        try:
+            storage.upsert_rows("jobs", [v[0] for v in changed.values()], "uid")
+            for uid, (_, blob) in changed.items():
+                _jobs_synced[uid] = blob
+            _jobs_warn_last = ""
+        except storage.StorageError as e:
+            if str(e) != _jobs_warn_last:
+                _jobs_warn_last = str(e)
+                print(f"⚠️ บันทึกตาราง jobs ไม่สำเร็จ (สร้างตารางด้วย supabase_setup.sql แล้วหรือยัง?): {e}")
+
+
+def _rows_to_jobs(rows):
+    jobs = []
+    for r in rows:
+        iso = r.get("job_date") or ""
+        date = f"{iso[8:10]}/{iso[5:7]}/{iso[0:4]}" if len(iso) >= 10 else "-"
+        jobs.append({
+            "id": r.get("job_code", ""), "date": date, "time": r.get("job_time", ""), "order": r.get("order_no", ""),
+            "pickup": r.get("pickup", ""), "pickup_display": r.get("pickup", ""),
+            "dropoff": r.get("dropoff", ""), "dropoff_display": r.get("dropoff", ""),
+            "flight": r.get("flight", ""), "car_code": r.get("car_code", ""), "price": r.get("price", ""),
+            "formatted_summary": r.get("summary", ""), "text": r.get("raw_text", ""),
+            "status": r.get("status", ""), "state": r.get("state") or "normal", "plate": r.get("plate", ""),
+            "events": r.get("events") or [], "received_at": r.get("received_at", ""), "from_history": True,
+        })
+    return jobs
+
+
+def history_dates():
+    """วันที่ที่มีใบงานในตาราง jobs (เก็บผลไว้ 60 วินาที)"""
+    if not storage.using_supabase():
+        return []
+    if time.time() - _history_dates_cache["at"] < 60:
+        return _history_dates_cache["dates"]
+    try:
+        rows = storage.select_rows("jobs", {"select": "job_date", "order": "job_date.desc", "limit": "3000"})
+    except storage.StorageError:
+        return _history_dates_cache["dates"]
+    seen = []
+    for r in rows:
+        iso = r.get("job_date")
+        if iso and iso not in seen:
+            seen.append(iso)
+    dates = [f"{i[8:10]}/{i[5:7]}/{i[0:4]}" for i in seen][:90]
+    _history_dates_cache.update(at=time.time(), dates=dates)
+    return dates
+
+
 def persist_state():
     """บันทึกคิว + ประวัติใบงานลง Supabase (กันข้อมูลหายตอนเซิร์ฟเวอร์หลับ)"""
     with state_lock:
@@ -426,6 +518,7 @@ def persist_state():
             "timer_start_time": timer_start_time,
             "pending_update_dates": list(pending_update_dates),
         }
+        job_rows = [_job_row(j) for j in latest_jobs]
     try:
         storage.set("job_state", snapshot)
     except storage.StorageError as e:
@@ -442,6 +535,7 @@ def persist_state():
         except storage.StorageError as e:
             _logs_dirty = True
             print(f"⚠️ บันทึกประวัติไม่สำเร็จ: {e}")
+    sync_jobs_table(job_rows)
 
 
 def restore_state():
@@ -1604,8 +1698,14 @@ def api_records():
             jobs.append(item)
         activity, sent = list(_activity_log), list(_sent_log)
 
-    dates = sorted({j["date"] for j in jobs} | {today}, key=_date_sort_key, reverse=True)
+    dates = sorted({j["date"] for j in jobs} | {today} | set(history_dates()), key=_date_sort_key, reverse=True)
     full = sorted([j for j in jobs if j["date"] == date], key=_id_sort_key)
+    if not full and storage.using_supabase() and _iso_date(date):
+        try:
+            rows = storage.select_rows("jobs", {"job_date": f"eq.{_iso_date(date)}", "select": "*", "limit": "1000"})
+            full = sorted(_rows_to_jobs(rows), key=_id_sort_key)
+        except storage.StorageError as e:
+            print(f"⚠️ อ่านตาราง jobs ไม่สำเร็จ: {e}")
     return jsonify({
         "date": date, "today": today, "dates": dates,
         "full": full,
@@ -1786,6 +1886,7 @@ def _keep_alive_loop(url):
 def _start_background():
     load_settings()
     restore_state()
+    persist_state()  # เขียนใบงานที่กู้คืนมาลงตาราง jobs ทันที (ย้ายข้อมูลเก่าเข้าตารางใหม่)
     base = os.getenv("KEEP_ALIVE_URL") or os.getenv("RENDER_EXTERNAL_URL")
     if base and os.getenv("KEEP_ALIVE", "1") != "0":
         url = base.rstrip("/") + "/health"
