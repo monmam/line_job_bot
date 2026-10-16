@@ -1118,6 +1118,63 @@ def return_plate(job_id, day=None, month=None, year=None, sender_id=None):
     return True, {"id": job_id, "date": dates[0]}
 
 
+_CANCEL_RE = re.compile(r'^\W*(?:cancel(?:led|lation)?|ยกเลิก)\W*$', re.IGNORECASE | re.MULTILINE)
+
+
+def is_cancel_ticket(text):
+    """ใบงานที่มีบรรทัด 'cancel' (หรือ 'ยกเลิก') ต่อท้าย = แจ้งยกเลิกงานนั้น"""
+    return bool(_CANCEL_RE.search(text or ""))
+
+
+def cancel_job(text, sender_id=None):
+    """ใบงาน + บรรทัด cancel -> สรุปย่อของงานนั้นเป็น 'F09 ❌CANCEL❌' (ค้นจากเลข Order ถ้าไม่มีใช้รหัส+วันที่)"""
+    global last_sender_id
+    ticket = _CANCEL_RE.sub("", text).strip()
+    parsed = parse_job_text(ticket)
+    order = str(parsed.get("order", "")).strip()
+    mark = lambda jid: f"{jid} ❌CANCEL❌"
+
+    with state_lock:
+        pool = job_queue + latest_jobs
+        if order and order != "-":
+            matches = [j for j in pool if str(j.get("order", "")).strip() == order]
+        else:
+            d = _norm_job_date(parsed.get("date"))
+            matches = [j for j in pool if str(j.get("id", "")).strip().upper() == str(parsed.get("id", "")).strip().upper()
+                       and _norm_job_date(j.get("date")) == d]
+        if matches:
+            queued_keys = {id(j) for j in job_queue}
+            already_sent = False
+            for job in matches:
+                job["cancelled"] = True
+                job["formatted_summary"] = mark(job.get("id"))
+                if id(job) not in queued_keys and job.get("status") != "รอส่ง":
+                    already_sent = True
+            job_id = matches[0].get("id")
+            if already_sent:
+                d = _norm_job_date(matches[0].get("date"))
+                if d not in pending_update_dates:
+                    pending_update_dates.append(d)
+                if sender_id:
+                    last_sender_id = sender_id
+                _ensure_timer()
+        else:
+            job_id = None
+
+    if job_id is None:  # ไม่เจองานเดิม: เพิ่มเป็นรายการ CANCEL ใหม่
+        ok, result = add_job_to_queue(ticket, sender_id=sender_id)
+        if not ok:
+            return False, result
+        with state_lock:
+            result["cancelled"] = True
+            result["formatted_summary"] = mark(result["id"])
+        persist_state()
+        return True, result
+
+    persist_state()
+    return True, {"id": job_id, "cancelled": True}
+
+
 def _date_sort_key(d):
     for fmt in ("%d/%m/%Y", "%Y/%m/%d", "%d/%m/%y"):
         try:
@@ -1342,6 +1399,15 @@ def handle_message(event):
                         reply_token=event.reply_token, messages=[TextMessage(text=f"⚠️ {result}")]))
             except Exception as e:
                 print(f"⚠️ ตอบกลับไม่ได้: {e}")
+        return
+
+    if is_cancel_ticket(received_text) and (
+            "【客户订单号】" in received_text or is_voucher_format(received_text)
+            or is_kv_format(received_text) or is_plain_format(received_text)):
+        ok, result = cancel_job(received_text, sender_id=user_id)
+        print(f"❌ ยกเลิกงาน {result['id']}" if ok else f"⚠️ ยกเลิกงานไม่สำเร็จ: {result}")
+        if ok:
+            _remember_reply(event.reply_token, chat_id)
         return
 
     plate = extract_plate(received_text)
