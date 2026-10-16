@@ -47,6 +47,7 @@
     .toast.show { opacity: 1; transform: translateY(0); }
     .original-content { display: none; }
     .original-content.open { display: block; }
+    .rec-tab.active { background: #2563eb; color: #fff; border-color: #2563eb; }
 
     .floating-nav-container {
       position: fixed;
@@ -134,6 +135,9 @@
       <button type="button" class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs" data-view="jobs"> 
        <i data-lucide="file-text" class="h-4 w-4"></i><span>ใบงาน</span> 
       </button> 
+      <button type="button" class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs" data-view="records">
+       <i data-lucide="archive" class="h-4 w-4"></i><span>บันทึกใบงาน</span>
+      </button>
       <button type="button" class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs" data-view="queue"> 
        <i data-lucide="clock" class="h-4 w-4"></i><span>Queue</span> 
       </button> 
@@ -166,6 +170,10 @@
         <i data-lucide="file-text" class="h-5 w-5"></i>
         <span>ใบงาน</span>
       </button>
+      <button type="button" class="floating-nav-item" data-view="records">
+        <i data-lucide="archive" class="h-5 w-5"></i>
+        <span>บันทึก</span>
+      </button>
       <button type="button" class="floating-nav-item" data-view="queue">
         <i data-lucide="clock" class="h-5 w-5"></i>
         <span>คิว</span>
@@ -197,7 +205,7 @@
          <div>
           <p class="m-0 text-xs text-[#64748B]">ใบงานวันนี้</p>
           <p id="stat-total" class="mb-0 mt-2 text-xl md:text-2xl font-bold text-[#0F172A]">0</p>
-          <p class="mt-1 text-[11px] text-[#94A3B8]">รับเข้าระบบแล้ว</p>
+          <p id="stat-total-date" class="mt-1 text-[11px] text-[#94A3B8]">รับเข้าระบบแล้ว</p>
          </div>
          <div class="p-2 bg-[#EFF6FF] text-[#2563EB] rounded-lg">
           <i data-lucide="clipboard-list" class="h-4 w-4"></i>
@@ -234,9 +242,9 @@
        <article class="page-card p-3 md:p-4">
         <div class="flex items-start justify-between">
          <div>
-          <p class="m-0 text-xs text-[#64748B]">ผิดพลาด</p>
+          <p class="m-0 text-xs text-[#64748B]">คืน / ยกเลิก</p>
           <p id="stat-error" class="mb-0 mt-2 text-xl md:text-2xl font-bold text-[#0F172A]">0</p>
-          <p class="mt-1 text-[11px] text-[#94A3B8]">ต้องตรวจสอบ</p>
+          <p class="mt-1 text-[11px] text-[#94A3B8]">📌 คืนงาน / ❌ ยกเลิก</p>
          </div>
          <div class="p-2 bg-[#FEE2E2] text-[#DC2626] rounded-lg">
           <i data-lucide="alert-circle" class="h-4 w-4"></i>
@@ -292,7 +300,7 @@
      <section id="jobs" class="view">
       <div class="mb-6">
        <h1 class="m-0 text-xl md:text-2xl font-bold tracking-tight text-[#0F172A]">ใบงาน</h1>
-       <p class="mt-1 text-xs md:text-sm font-semibold text-[#64748B]">รายการใบงานทั้งหมดที่ดึงจาก Google Sheets</p>
+       <p class="mt-1 text-xs md:text-sm font-semibold text-[#64748B]">ใบงานทั้งหมดในระบบ แยกตามวันที่ (ใบเต็ม สถานะส่ง คืน/ยกเลิก)</p>
       </div>
 
       <div class="page-card p-3 mb-4">
@@ -303,7 +311,7 @@
         </div>
         <div>
          <select id="date-filter" class="w-full rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs outline-none focus:border-[#2563EB] text-[#334155]">
-          <option value="">วันที่ทั้งหมด</option>
+          <option value="">กำลังโหลด...</option>
          </select>
         </div>
         <div>
@@ -311,6 +319,8 @@
           <option value="">สถานะทั้งหมด</option>
           <option value="sent">ส่งแล้ว</option>
           <option value="waiting">รอส่ง</option>
+          <option value="returned">📌 คืนงาน</option>
+          <option value="cancelled">❌ ยกเลิก</option>
          </select>
         </div>
        </div>
@@ -332,7 +342,7 @@
            <th class="px-4 py-3 font-medium">รถ</th>
            <th class="px-4 py-3 font-medium">ราคา</th>
            <th class="px-4 py-3 font-medium">สถานะ</th>
-           <th class="px-4 py-3 font-medium text-right">จัดการ</th>
+           <th class="px-4 py-3 font-medium text-right">ดู</th>
           </tr>
          </thead>
          <tbody id="jobs-table-body" class="divide-y divide-[#F1F5F9] text-[#334155]">
@@ -343,6 +353,35 @@
         </table>
        </div>
       </div>
+     </section>
+
+     <!-- RECORDS VIEW -->
+     <section id="records" class="view">
+      <div class="mb-6 flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+       <div>
+        <h1 class="m-0 text-xl md:text-2xl font-bold tracking-tight text-[#0F172A]">บันทึกใบงาน</h1>
+        <p class="mt-1 text-xs md:text-sm font-semibold text-[#64748B]">ข้อมูลทั้งหมดแยกตามวันที่: ใบงานเต็ม ใบงานย่อ คืนงาน ยกเลิกงาน และประวัติการส่ง</p>
+       </div>
+       <select id="records-date" class="rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs outline-none focus:border-[#2563EB] text-[#334155]"></select>
+      </div>
+
+      <div id="records-tabs" class="mb-4 flex flex-wrap gap-2 text-xs">
+       <button type="button" data-tab="compact" class="rec-tab rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 font-medium">ใบงานย่อ <span id="cnt-compact" class="ml-1 text-[#94A3B8]"></span></button>
+       <button type="button" data-tab="full" class="rec-tab rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 font-medium">ใบงานเต็ม <span id="cnt-full" class="ml-1 text-[#94A3B8]"></span></button>
+       <button type="button" data-tab="returns" class="rec-tab rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 font-medium">📌 คืนงาน <span id="cnt-returns" class="ml-1 text-[#94A3B8]"></span></button>
+       <button type="button" data-tab="cancels" class="rec-tab rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 font-medium">❌ ยกเลิก <span id="cnt-cancels" class="ml-1 text-[#94A3B8]"></span></button>
+       <button type="button" data-tab="sent" class="rec-tab rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 font-medium">ประวัติการส่ง <span id="cnt-sent" class="ml-1 text-[#94A3B8]"></span></button>
+       <button type="button" data-tab="activity" class="rec-tab rounded-lg border border-[#E2E8F0] bg-white px-3 py-1.5 font-medium">บันทึกเหตุการณ์ <span id="cnt-activity" class="ml-1 text-[#94A3B8]"></span></button>
+      </div>
+
+      <article class="page-card p-4 md:p-6">
+       <div id="rec-compact" class="rec-panel"></div>
+       <div id="rec-full" class="rec-panel hidden"></div>
+       <div id="rec-returns" class="rec-panel hidden"></div>
+       <div id="rec-cancels" class="rec-panel hidden"></div>
+       <div id="rec-sent" class="rec-panel hidden"></div>
+       <div id="rec-activity" class="rec-panel hidden"></div>
+      </article>
      </section>
 
      <!-- DETAIL VIEW -->
@@ -373,6 +412,11 @@
         </div>
        </div>
        <pre id="detail-summary-text" class="mt-4 whitespace-pre-wrap rounded-lg bg-[#F8FAFC] p-4 text-xs leading-5 text-[#334155] border border-[#F1F5F9] max-w-full overflow-x-auto"></pre>
+      </article>
+
+      <article class="page-card mt-5 p-4 md:p-6">
+       <h2 class="m-0 text-sm font-bold text-[#0F172A]">ประวัติของใบงานนี้</h2>
+       <ul id="detail-events" class="mt-3 space-y-1.5 text-xs text-[#475569]"></ul>
       </article>
 
       <article class="page-card mt-5 p-4 md:p-6">
@@ -610,9 +654,33 @@
 
   <script>
     let localJobs = {};
+    let records = null;        // ข้อมูลล่าสุดจาก /api/records
+    let recordsDate = "";      // วันที่ที่เลือกดู ("" = วันนี้)
+    const EVENT_LABELS = { new: "🆕 รับใบงานใหม่", amend: "✏️ แก้ไขใบงาน", duplicate: "♻️ ส่งซ้ำ (ไม่รับ)", plate: "🚗 ใส่ป้ายทะเบียน", return: "📌 คืนงาน", cancel: "❌ ยกเลิกงาน" };
+
+    // คีย์ใบงาน = วันที่|รหัส|Order (รหัสเดียวกันต่างวันไม่ปนกัน)
+    function jobKey(job) {
+      return [getJobVal(job, 'date'), getJobVal(job, 'id'), getJobVal(job, 'order')].join('|');
+    }
+    function jobState(job) {
+      if (job.state) return job.state;
+      if (job.cancelled) return 'cancelled';
+      return job.plate === '📌' ? 'returned' : 'normal';
+    }
+    function stateBadge(job) {
+      const st = jobState(job);
+      if (st === 'cancelled') return '<span class="rounded bg-red-50 px-1.5 py-0.5 text-[11px] font-medium text-red-600">❌ ยกเลิก</span>';
+      if (st === 'returned') return '<span class="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-600">📌 คืนงาน</span>';
+      if (job.status === 'รอส่ง' || job.status === 'waiting') return '<span class="flex items-center gap-1.5 text-[11px] font-medium text-[#D97706]"><span class="status-dot bg-[#F59E0B]"></span>รอส่ง</span>';
+      return '<span class="flex items-center gap-1.5 text-[11px] font-medium text-[#22C55E]"><span class="status-dot bg-[#22C55E]"></span>ส่งแล้ว</span>';
+    }
+    function firstLine(job) {
+      return String(job.formatted_summary || '').split('\n')[0] || getJobVal(job, 'id');
+    }
     const titles = { 
       dashboard: "DASHBOARD\nภาพรวมใบงานวันนี้", 
-      jobs: "ใบงาน\nรายการใบงานทั้งหมดที่ดึงจาก Google Sheets", 
+      jobs: "ใบงาน\nใบงานทั้งหมดในระบบ แยกตามวันที่",
+      records: "บันทึกใบงาน\nใบเต็ม ใบย่อ คืนงาน ยกเลิกงาน", 
       detail: "รายละเอียดใบงาน\nข้อมูลเชิงลึกของใบงานที่เลือก", 
       queue: "QUEUE\nใบงานที่กำลังรอประมวลผล", 
       settings: "SETTINGS\nตั้งค่าการทำงานของระบบ", 
@@ -679,21 +747,21 @@
       }
     }
 
-    function openJob(jobId) {
-      const job = localJobs[jobId];
+    function openJob(jobKeyStr) {
+      const job = localJobs[jobKeyStr];
       if (!job) return;
 
       const id = getJobVal(job, 'id', 'job_id', 'code', 'ID', 'รหัส');
       const date = getJobVal(job, 'date', 'created_at', 'วันที่', 'Date');
       const time = getJobVal(job, 'time', 'เวลา', 'Time');
-      const statusText = "บันทึกใน Sheet แล้ว";
+      const st = jobState(job);
 
       document.getElementById("detail-id").textContent = id;
       document.getElementById("detail-date").textContent = date + " • " + time;
-      
+
       const status = document.getElementById("detail-status");
-      status.className = "flex items-center gap-1.5 text-xs font-medium text-[#22C55E]";
-      status.innerHTML = '<span class="status-dot bg-[#22C55E]"></span>' + statusText;
+      status.className = "flex items-center gap-1.5 text-xs font-medium";
+      status.innerHTML = stateBadge(job);
 
       const carCode = getJobVal(job, 'car_code', 'car', 'รถ', 'Car');
       const priceVal = getJobVal(job, 'price', 'ราคา', 'Price');
@@ -703,21 +771,27 @@
       const orderVal = getJobVal(job, 'Order Number', 'order', 'Order', 'คำสั่งซื้อ');
 
       const fields = [
-        ["รถ", carCode], 
-        ["ราคา", priceVal + " บาท"], 
-        ["จุดรับ", pickupDisp], 
-        ["จุดส่ง", dropoffDisp], 
-        ["เที่ยวบิน", flightVal], 
-        ["Order Number", orderVal]
+        ["รถ", carCode],
+        ["ราคา", priceVal + " บาท"],
+        ["จุดรับ", pickupDisp],
+        ["จุดส่ง", dropoffDisp],
+        ["เที่ยวบิน", flightVal],
+        ["Order Number", orderVal],
+        ["ป้ายทะเบียน", job.plate || "-"]
       ];
-      
-      document.getElementById("detail-grid").innerHTML = fields.map(field => 
-        '<div><dt class="text-xs text-[#64748B]">' + field[0] + '</dt><dd class="mt-1 font-semibold text-[#0F172A]">' + field[1] + '</dd></div>'
+
+      document.getElementById("detail-grid").innerHTML = fields.map(field =>
+        '<div><dt class="text-xs text-[#64748B]">' + escapeHtml(field[0]) + '</dt><dd class="mt-1 font-semibold text-[#0F172A]">' + escapeHtml(field[1]) + '</dd></div>'
       ).join("");
-      
+
       const summary = job.formatted_summary || `${id}(🥶)${time}/${priceVal}#${carCode}\n${pickupDisp}-${dropoffDisp} ✈️${flightVal}\n${orderVal}`;
       document.getElementById("detail-summary-text").textContent = summary;
-      
+
+      const events = job.events || [];
+      document.getElementById("detail-events").innerHTML = events.length
+        ? events.slice().reverse().map(e => '<li><span class="text-[#94A3B8]">' + escapeHtml(e.ts) + '</span> &nbsp;' + escapeHtml(EVENT_LABELS[e.type] || e.type) + (e.detail ? ' <span class="text-[#94A3B8]">(' + escapeHtml(e.detail) + ')</span>' : '') + '</li>').join('')
+        : '<li class="text-[#94A3B8]">ยังไม่มีประวัติ</li>';
+
       const originalText = getJobVal(job, 'text', 'raw_text', 'Raw Text', 'ข้อความต้นฉบับ', 'formatted_summary');
       document.getElementById("original-content").textContent = originalText;
       document.getElementById("original-content").classList.remove("open");
@@ -764,43 +838,84 @@
       }
     }
 
-    async function fetchGoogleSheetsData() {
+    async function fetchRecords(date) {
+      if (date !== undefined) recordsDate = date;
       try {
-        const res = await fetch('/api/get_sheets_data');
+        const res = await fetch('/api/records' + (recordsDate ? '?date=' + encodeURIComponent(recordsDate) : ''));
         if (!res.ok) return;
-        const result = await res.json();
-        
-        if (result.success && result.data && result.data.length > 0) {
-          const sheetJobs = result.data.map((r, index) => ({
-            id: r.รหัสใบงาน || r.job_id || r.ID || r.รหัส || r.Code || `JOB-${index + 1}`,
-            date: r.date || r.Date || r.วันที่ || "-",
-            time: r.time || r.Time || r.เวลา || "-",
-            pickup_display: r.pickup_display || r.Pickup || r.จุดรับ || "-",
-            dropoff_display: r.dropoff_display || r.Dropoff || r.จุดส่ง || "-",
-            flight: r.flight || r.Flight || r.เที่ยวบิน || "-",
-            order: r['Order Number'] || r.order || r.Order || r.คำสั่งซื้อ || "-",
-            car_code: r.car_code || r.Car || r.รถ || "-",
-            price: r.price || r.Price || r.ราคา || "-",
-            status: "ส่งแล้ว",
-            text: r.text || r.raw_text || r['ข้อความต้นฉบับ'] || r.formatted_summary || "-"
-          }));
-
-          renderRecentJobs(sheetJobs);
-          renderJobsTable(sheetJobs);
-          document.getElementById('stat-total').innerText = sheetJobs.length;
-          document.getElementById('stat-sent').innerText = sheetJobs.length;
-        }
+        records = await res.json();
+        recordsDate = records.date === records.today && !date ? recordsDate : records.date;
+        fillDateSelects(records);
+        renderJobsTable(records.full);
+        renderRecords(records);
       } catch (err) {
-        console.error("Error loading sheets data:", err);
+        console.error("Error loading records:", err);
       }
     }
-    
+
+    function fillDateSelects(data) {
+      ['date-filter', 'records-date'].forEach(id => {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const html = data.dates.map(d => '<option value="' + d + '"' + (d === data.date ? ' selected' : '') + '>' + d + (d === data.today ? ' (วันนี้)' : '') + '</option>').join('');
+        if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+        el.value = data.date;
+      });
+    }
+
+    function showRecTab(tab) {
+      document.querySelectorAll('.rec-tab').forEach(b => b.classList.toggle('active', b.dataset.tab === tab));
+      document.querySelectorAll('.rec-panel').forEach(p => p.classList.toggle('hidden', p.id !== 'rec-' + tab));
+    }
+
+    function jobCard(job) {
+      localJobs[jobKey(job)] = job;
+      return '<div class="py-3 border-b border-[#F1F5F9] last:border-0">'
+        + '<div class="flex items-center justify-between gap-2"><button type="button" data-k="' + escapeHtml(jobKey(job)) + '" onclick="openJob(this.dataset.k)" class="text-left text-xs font-bold text-[#2563EB] hover:underline">' + escapeHtml(getJobVal(job, 'id')) + ' <span class="font-normal text-[#94A3B8]">' + escapeHtml(getJobVal(job, 'time')) + '</span></button>' + stateBadge(job) + '</div>'
+        + '<pre class="mt-2 whitespace-pre-wrap rounded-lg bg-[#F8FAFC] p-3 text-xs leading-5 text-[#334155] border border-[#F1F5F9]">' + escapeHtml(job.formatted_summary || '') + '</pre>'
+        + '<details class="mt-2 text-xs text-[#64748B]"><summary class="cursor-pointer">ข้อความต้นฉบับ</summary><pre class="mt-2 whitespace-pre-wrap rounded-lg bg-[#F8FAFC] p-3 text-xs border border-[#F1F5F9]">' + escapeHtml(job.text || job.raw_text || '') + '</pre></details>'
+        + '</div>';
+    }
+
+    function renderRecords(d) {
+      const empty = t => '<p class="py-6 text-center text-xs text-[#94A3B8]">' + t + '</p>';
+      const set = (id, html) => { document.getElementById(id).innerHTML = html; };
+      const cnt = (id, n) => { document.getElementById(id).textContent = n ? '(' + n + ')' : ''; };
+
+      set('rec-compact', d.compact
+        ? '<div class="flex justify-end mb-2"><button type="button" id="copy-compact" class="rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-xs font-medium text-[#64748B] hover:bg-[#F8FAFC]">คัดลอก</button></div><pre id="compact-text" class="whitespace-pre-wrap rounded-lg bg-[#F8FAFC] p-4 text-xs leading-6 text-[#334155] border border-[#F1F5F9]">' + escapeHtml(d.compact) + '</pre>'
+        : empty('ยังไม่มีใบงานของวันนี้'));
+      const copyBtn = document.getElementById('copy-compact');
+      if (copyBtn) copyBtn.onclick = () => navigator.clipboard.writeText(d.compact).then(() => showToast('คัดลอกใบงานย่อแล้ว'));
+      set('rec-full', d.full.length ? d.full.map(jobCard).join('') : empty('ไม่มีใบงานเต็มของวันนี้'));
+      set('rec-returns', d.returns.length ? d.returns.map(jobCard).join('') : empty('ไม่มีงานที่คืน'));
+      set('rec-cancels', d.cancels.length ? d.cancels.map(jobCard).join('') : empty('ไม่มีงานที่ยกเลิก'));
+      set('rec-sent', d.sent.length ? d.sent.map(x =>
+        '<div class="py-3 border-b border-[#F1F5F9] last:border-0"><div class="flex flex-wrap items-center gap-2 text-xs"><span class="text-[#94A3B8]">' + escapeHtml(x.ts) + '</span>'
+        + '<span class="rounded bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-600">' + (x.kind === 'compact' ? 'ใบงานย่อ' : 'ใบสรุป') + '</span>'
+        + x.targets.map(t => '<span class="' + (t.ok ? 'text-[#16A34A]' : 'text-red-600') + '">' + (t.ok ? '✅' : '❌') + ' ' + escapeHtml(t.to) + ' (' + t.via + ')</span>').join('')
+        + '</div><details class="mt-2 text-xs text-[#64748B]"><summary class="cursor-pointer">ข้อความที่ส่ง</summary><pre class="mt-2 whitespace-pre-wrap rounded-lg bg-[#F8FAFC] p-3 text-xs border border-[#F1F5F9]">' + escapeHtml(x.text) + '</pre></details></div>').join('')
+        : empty('ยังไม่มีประวัติการส่งของวันนี้'));
+      set('rec-activity', d.activity.length
+        ? '<table class="w-full text-left text-xs"><thead class="text-[11px] text-[#64748B]"><tr><th class="py-2 pr-3 font-medium">เวลา</th><th class="py-2 pr-3 font-medium">เหตุการณ์</th><th class="py-2 pr-3 font-medium">รหัส</th><th class="py-2 font-medium">รายละเอียด</th></tr></thead><tbody class="divide-y divide-[#F1F5F9]">'
+          + d.activity.map(a => '<tr><td class="py-2 pr-3 text-[#94A3B8] whitespace-nowrap">' + escapeHtml(a.ts) + '</td><td class="py-2 pr-3 whitespace-nowrap">' + escapeHtml(EVENT_LABELS[a.type] || a.type) + '</td><td class="py-2 pr-3 font-bold">' + escapeHtml(a.id) + '</td><td class="py-2 text-[#64748B]">' + escapeHtml(a.detail || '') + '</td></tr>').join('')
+          + '</tbody></table>'
+        : empty('ยังไม่มีเหตุการณ์ของวันนี้'));
+      cnt('cnt-compact', d.full.length); cnt('cnt-full', d.full.length); cnt('cnt-returns', d.returns.length);
+      cnt('cnt-cancels', d.cancels.length); cnt('cnt-sent', d.sent.length); cnt('cnt-activity', d.activity.length);
+    }
+
     async function fetchDashboardData() {
       try {
         const res = await fetch('/api/status');
         if (!res.ok) return;
         const data = await res.json();
 
+        const ts = data.today_stats || {};
+        document.getElementById('stat-total').innerText = ts.total ?? 0;
+        document.getElementById('stat-total-date').innerText = ts.date ? 'วันที่ ' + ts.date : 'รับเข้าระบบแล้ว';
+        document.getElementById('stat-sent').innerText = ts.sent ?? 0;
+        document.getElementById('stat-error').innerText = (ts.returned ?? 0) + ' / ' + (ts.cancelled ?? 0);
         document.getElementById('stat-queue').innerText = data.queue_count ?? 0;
         document.getElementById('dashboard-queue-count').innerText = `${data.queue_count ?? 0} ใบงาน`;
         document.getElementById('queue-view-count').innerText = `${data.queue_count ?? 0} ใบงาน`;
@@ -829,12 +944,16 @@
         }
 
         if (data.latest_jobs && data.latest_jobs.length > 0) {
-          data.latest_jobs.forEach(j => {
-            const jId = getJobVal(j, 'id', 'job_id', 'code');
-            if (jId !== "-") {
-              localJobs[jId] = j;
-            }
+          data.latest_jobs.forEach(j => { localJobs[jobKey(j)] = j; });
+          const seenKeys = new Set();
+          const todayJobs = data.latest_jobs.filter(j => {
+            if (j.status === 'ยกเลิก' || (ts.date && j.date !== ts.date)) return false;
+            const k = jobKey(j);
+            if (seenKeys.has(k)) return false;
+            seenKeys.add(k);
+            return true;
           });
+          renderRecentJobs(todayJobs);
           renderQueueList(data.latest_jobs.filter(j => j.status === 'รอส่ง' || j.status === 'waiting'));
         }
 
@@ -1163,7 +1282,7 @@
             const data = await res.json();
             showToast(data.message || "ส่งสรุปใบงานเรียบร้อยแล้ว");
             fetchDashboardData();
-            fetchGoogleSheetsData();
+            fetchRecords();
           } catch (e) {
             showToast("❌ ส่งไม่สำเร็จ: เชื่อมต่อเซิร์ฟเวอร์ไม่ได้");
           }
@@ -1292,9 +1411,17 @@
       });
 
       setInterval(fetchDashboardData, 5000);
+      setInterval(() => fetchRecords(), 15000);
+
+      ['date-filter', 'records-date'].forEach(id => {
+        document.getElementById(id).addEventListener('change', e => fetchRecords(e.target.value));
+      });
+      document.getElementById('status-filter').addEventListener('change', () => { if (records) renderJobsTable(records.full); });
+      document.querySelectorAll('.rec-tab').forEach(b => b.addEventListener('click', () => showRecTab(b.dataset.tab)));
+      showRecTab('compact');
       setInterval(checkSystemHealth, 30000);
       fetchDashboardData();
-      fetchGoogleSheetsData();
+      fetchRecords();
       loadSettings();
       checkSystemHealth();
       lucide.createIcons();
@@ -1303,26 +1430,27 @@
     function renderRecentJobs(jobList) {
       const container = document.getElementById('recent-jobs-container');
       if (!container) return;
+      if (!jobList || jobList.length === 0) {
+        container.innerHTML = '<p class="py-6 text-center text-xs text-[#94A3B8]">วันนี้ยังไม่มีใบงานในระบบ</p>';
+        return;
+      }
 
       container.innerHTML = jobList.slice(0, 5).map(job => {
-        const id = getJobVal(job, 'id', 'job_id', 'code', 'ID', 'รหัส');
-        localJobs[id] = job;
-
-        const time = getJobVal(job, 'time', 'เวลา', 'Time');
-        const pickup = getJobVal(job, 'pickup_display', 'pickup', 'จุดรับ', 'Pickup');
-        const dropoff = getJobVal(job, 'dropoff_display', 'dropoff', 'จุดส่ง', 'Dropoff');
-        const flight = getJobVal(job, 'flight', 'เที่ยวบิน', 'Flight');
-        const car = getJobVal(job, 'car_code', 'car', 'รถ', 'Car');
+        const id = getJobVal(job, 'id');
+        const time = getJobVal(job, 'time');
+        const pickup = getJobVal(job, 'pickup_display', 'pickup');
+        const dropoff = getJobVal(job, 'dropoff_display', 'dropoff');
+        const flight = getJobVal(job, 'flight');
+        const car = getJobVal(job, 'car_code', 'car');
+        const route = jobState(job) === 'cancelled' ? '<span class="text-red-600 font-semibold">❌ CANCEL</span>' : escapeHtml(pickup) + ' → ' + escapeHtml(dropoff) + ' <span class="ml-3 text-[#0F172A] font-medium">' + escapeHtml(flight) + '</span>';
 
         return `
-        <button type="button" onclick="openJob('${id}')" class="job-open flex w-full items-center justify-between py-3.5 text-left border-b border-[#F1F5F9] last:border-0 hover:bg-[#F8FAFC]">
+        <button type="button" data-k="${escapeHtml(jobKey(job))}" onclick="openJob(this.dataset.k)" class="job-open flex w-full items-center justify-between py-3.5 text-left border-b border-[#F1F5F9] last:border-0 hover:bg-[#F8FAFC]">
          <div>
-          <p class="m-0 text-xs font-bold text-[#0F172A]">${id} <span class="ml-2 font-normal text-[#94A3B8]">${time}</span> <span class="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600 font-semibold">${car}</span></p>
-          <p class="mt-1 text-xs text-[#64748B]">${pickup} → ${dropoff} <span class="ml-3 text-[#0F172A] font-medium">${flight}</span></p>
+          <p class="m-0 text-xs font-bold text-[#0F172A]">${escapeHtml(id)} <span class="ml-2 font-normal text-[#94A3B8]">${escapeHtml(time)}</span> <span class="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] text-blue-600 font-semibold">${escapeHtml(car)}</span></p>
+          <p class="mt-1 text-xs text-[#64748B]">${route}</p>
          </div>
-         <span class="flex items-center gap-1.5 text-[11px] font-medium text-[#22C55E]">
-          <span class="status-dot bg-[#22C55E]"></span>ส่งแล้ว
-         </span>
+         ${stateBadge(job)}
         </button>`;
       }).join('');
     }
@@ -1331,77 +1459,42 @@
       const tbody = document.getElementById('jobs-table-body');
       if (!tbody) return;
 
-      if (!jobList || jobList.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="11" class="px-5 py-8 text-center text-[#94A3B8]">ยังไม่มีข้อมูลใบงาน</td></tr>';
+      const wanted = document.getElementById('status-filter').value;
+      const rows = (jobList || []).filter(job => {
+        if (!wanted) return true;
+        const st = jobState(job);
+        if (wanted === 'returned' || wanted === 'cancelled') return st === wanted;
+        const waiting = job.status === 'รอส่ง' || job.status === 'waiting';
+        return wanted === 'waiting' ? waiting : !waiting;
+      });
+
+      if (rows.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="11" class="px-5 py-8 text-center text-[#94A3B8]">ไม่มีใบงานของวันที่เลือก</td></tr>';
         return;
       }
 
-      tbody.innerHTML = jobList.map((job) => {
-        const id = getJobVal(job, 'รหัสใบงาน', 'id', 'job_id', 'code', 'ID', 'รหัส');
-        localJobs[id] = job;
-
-        const date = getJobVal(job, 'date', 'Date', 'วันที่', '-');
-        const time = getJobVal(job, 'time', 'Time', 'เวลา', '-');
-        const pickup = getJobVal(job, 'pickup_display', 'Pickup', 'จุดรับ', '-');
-        const dropoff = getJobVal(job, 'dropoff_display', 'Dropoff', 'จุดส่ง', '-');
-        const flight = getJobVal(job, 'flight', 'Flight', 'เที่ยวบิน', '-');
-        const order = getJobVal(job, 'Order Number', 'order', 'Order', 'คำสั่งซื้อ', '-');
-        const car = getJobVal(job, 'car_code', 'Car', 'รถ', '-');
-        const price = getJobVal(job, 'price', 'Price', 'ราคา', '-');
-
+      tbody.innerHTML = rows.map(job => {
+        localJobs[jobKey(job)] = job;
+        const k = escapeHtml(jobKey(job));
+        const cell = (v, cls) => `<td class="px-4 py-3.5 cursor-pointer ${cls || ''}" data-k="${k}" onclick="openJob(this.dataset.k)">${escapeHtml(v)}</td>`;
+        const cancelled = jobState(job) === 'cancelled';
         return `
         <tr class="job-row hover:bg-[#F8FAFC]">
-          <td class="px-4 py-3.5 cursor-pointer" onclick="openJob('${id}')">${date}</td>
-          <td class="px-4 py-3.5 font-bold text-[#2563EB] cursor-pointer" onclick="openJob('${id}')">${id}</td>
-          <td class="px-4 py-3.5 cursor-pointer" onclick="openJob('${id}')">${time}</td>
-          <td class="px-4 py-3.5 cursor-pointer" onclick="openJob('${id}')">${pickup}</td>
-          <td class="px-4 py-3.5 cursor-pointer" onclick="openJob('${id}')">${dropoff}</td>
-          <td class="px-4 py-3.5 cursor-pointer" onclick="openJob('${id}')">${flight}</td>
-          <td class="px-4 py-3.5 font-mono text-[11px] text-[#64748B] cursor-pointer" onclick="openJob('${id}')">${order}</td>
-          <td class="px-4 py-3.5 font-semibold text-[#0F172A] cursor-pointer" onclick="openJob('${id}')">${car}</td>
-          <td class="px-4 py-3.5 font-medium text-[#16A34A] cursor-pointer" onclick="openJob('${id}')">${price}</td>
-          <td class="px-4 py-3.5 cursor-pointer" onclick="openJob('${id}')">
-            <span class="flex items-center gap-1.5 text-[11px] font-medium text-[#22C55E]">
-              <span class="status-dot bg-[#22C55E]"></span>ส่งแล้ว
-            </span>
-          </td>
-          <td class="px-4 py-3.5 text-right">
-            <button type="button" onclick="deleteJobRow('${id}')" class="rounded bg-red-50 px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-100">ลบ</button>
-          </td>
+          ${cell(getJobVal(job, 'date'))}
+          ${cell(getJobVal(job, 'id'), 'font-bold text-[#2563EB]')}
+          ${cell(getJobVal(job, 'time'))}
+          ${cell(cancelled ? '-' : getJobVal(job, 'pickup_display', 'pickup'))}
+          ${cell(cancelled ? '❌ CANCEL' : getJobVal(job, 'dropoff_display', 'dropoff'))}
+          ${cell(getJobVal(job, 'flight'))}
+          ${cell(getJobVal(job, 'order'), 'font-mono text-[11px] text-[#64748B]')}
+          ${cell(getJobVal(job, 'car_code', 'car'), 'font-semibold text-[#0F172A]')}
+          ${cell(getJobVal(job, 'price'), 'font-medium text-[#16A34A]')}
+          <td class="px-4 py-3.5 cursor-pointer" data-k="${k}" onclick="openJob(this.dataset.k)">${stateBadge(job)}</td>
+          <td class="px-4 py-3.5 text-right"><button type="button" data-k="${k}" onclick="openJob(this.dataset.k)" class="rounded bg-blue-50 px-2 py-1 text-[11px] font-medium text-blue-600 hover:bg-blue-100">เปิด</button></td>
         </tr>`;
       }).join('');
-    }
-
-    function deleteJobRow(jobId) {
-      showModal({
-        title: "ยืนยันการลบใบงาน",
-        desc: `คุณต้องการลบใบงานรหัส ${jobId} ใช่หรือไม่?`,
-        confirmText: "ลบใบงาน",
-        confirmClass: "bg-red-600 hover:bg-red-700",
-        iconName: "alert-triangle",
-        iconClass: "bg-red-50 text-red-600",
-        onConfirm: async () => {
-          try {
-            const res = await fetch('/api/delete_job', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ id: jobId })
-            });
-            const data = await res.json();
-
-            if (data.success) {
-              delete localJobs[jobId];
-              showToast(`ลบใบงาน ${jobId} สำเร็จ`);
-              fetchGoogleSheetsData();
-            } else {
-              showToast(data.message || "ลบข้อมูลไม่สำเร็จ");
-            }
-          } catch (err) {
-            console.error(err);
-            showToast("เกิดข้อผิดพลาดในการเชื่อมต่อกับเซิร์ฟเวอร์");
-          }
-        }
-      });
+      const q = document.getElementById('job-search').value.trim();
+      if (q) document.getElementById('job-search').dispatchEvent(new Event('input'));
     }
 
     function renderQueueList(queueJobs) {
@@ -1425,7 +1518,7 @@
         const car = getJobVal(job, 'car_code', 'car', 'รถ');
 
         return `
-        <button type="button" onclick="openJob('${id}')" class="flex w-full items-center justify-between py-3.5 text-left border-b border-[#F1F5F9] hover:bg-[#F8FAFC]">
+        <button type="button" data-k="${escapeHtml(jobKey(job))}" onclick="openJob(this.dataset.k)" class="flex w-full items-center justify-between py-3.5 text-left border-b border-[#F1F5F9] hover:bg-[#F8FAFC]">
          <div>
           <p class="m-0 text-xs font-bold text-[#0F172A]">${id} <span class="ml-2 font-normal text-[#94A3B8]">${time}</span> <span class="ml-2 font-semibold text-[#2563EB]">(${car})</span></p>
           <p class="mt-1 text-xs text-[#64748B]">${pickup} → ${dropoff}</p>
