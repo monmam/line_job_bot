@@ -75,11 +75,8 @@ def _make_backup_handler(secret, conf, name):
 
     @h.add(MessageEvent, message=TextMessageContent)
     def _on_message(event):
-        src = event.source
-        if event.message.text.strip().lower() == "id" and src.type in ("group", "room"):
-            cid = getattr(src, 'group_id', None) or getattr(src, 'room_id', None)
-            print(f"🆔 {name} ตอบ ID ของ {src.type}: {cid}")
-            _reply_text(conf, event.reply_token, str(cid))
+        print(f"🤖 ข้อความเข้าบอท {name}")
+        _handle_text(event, conf)
 
     @h.add(JoinEvent)
     def _on_join(event):
@@ -1549,9 +1546,9 @@ def process_batch_jobs():
                 messages = [TextMessage(text=c) for c in chunks]
                 # แชทที่ส่งใบงานมา: ตอบด้วย reply ก่อน (ฟรี) ถ้าไม่ได้ค่อยใช้ push
                 if reply and reply["chat_id"] == to:
-                    token, reply = reply["token"], None
+                    token, reply_conf, reply = reply["token"], reply.get("conf") or configuration, None
                     try:
-                        with ApiClient(configuration) as api_client:
+                        with ApiClient(reply_conf) as api_client:
                             MessagingApi(api_client).reply_message(
                                 ReplyMessageRequest(reply_token=token, messages=messages))
                         results.append((label, True, "reply"))
@@ -1599,6 +1596,11 @@ def handle_leave(event):
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
+    _handle_text(event, configuration)
+
+
+def _handle_text(event, conf):
+    """จัดการข้อความที่เข้ามา conf = บอทที่รับข้อความ (บอทหลักหรือบอทสำรอง) ใช้ตอบกลับด้วยบอทตัวเดียวกัน"""
     received_text = event.message.text.strip()
     source_type = event.source.type
     user_id = getattr(event.source, 'user_id', None)
@@ -1606,13 +1608,20 @@ def handle_message(event):
     print(f"📩 ได้รับข้อความจาก {source_type}: {first_line!r}")
 
     if source_type == 'group' and received_text.lower() == "id":
-        with ApiClient(configuration) as api_client:
-            MessagingApi(api_client).reply_message(
-                ReplyMessageRequest(
-                    reply_token=event.reply_token,
-                    messages=[TextMessage(text=f"{event.source.group_id}")]
-                )
-            )
+        print(f"🆔 ตอบ ID ของกลุ่ม: {event.source.group_id}")
+        _reply_text(conf, event.reply_token, f"{event.source.group_id}")
+        return
+
+    # "Update 17/10" -> ตอบเฉพาะตารางสรุปย่อของวันนั้น (ใช้ reply ไม่เสียโควต้า ไม่ส่งเข้ากลุ่มอื่น)
+    um = _UPDATE_RE.match(received_text)
+    if um:
+        date = parse_update_date(um.group(1))
+        if date is None:
+            reply = "รูปแบบ: Update 17 หรือ Update 17/10 หรือ Update 17/10/2026 (พิมพ์ Update เฉย ๆ = วันนี้)"
+        else:
+            reply = generate_compact_list(sorted(jobs_for_date(date), key=_id_sort_key)) or f"ไม่มีใบงานวันที่ {date}"
+        print(f"📋 Update {date or um.group(1)!r}")
+        _reply_text(conf, event.reply_token, reply[:4900])
         return
 
     # กลุ่มที่ไม่ได้เปิด "อ่านใบงาน" -> ห้ามอ่านงานในกลุ่มนั้น (ส่งใบสรุปได้อย่างเดียว)
@@ -1633,19 +1642,7 @@ def handle_message(event):
         ok, result = update_plate(rm.group(1).strip(), RETURN_MARK, sender_id=user_id)
         print(f"📌 คืนงานจากใบงาน {result['id']}" if ok else f"⚠️ คืนงานไม่สำเร็จ: {result}")
         if ok:
-            _remember_reply(event.reply_token, chat_id)
-        return
-
-    # "Update 17/10" -> ตอบเฉพาะตารางสรุปย่อของวันนั้น (ใช้ reply ไม่เสียโควต้า ไม่ส่งเข้ากลุ่มอื่น)
-    um = _UPDATE_RE.match(received_text)
-    if um:
-        date = parse_update_date(um.group(1))
-        if date is None:
-            reply = "รูปแบบ: Update 17 หรือ Update 17/10 หรือ Update 17/10/2026 (พิมพ์ Update เฉย ๆ = วันนี้)"
-        else:
-            reply = generate_compact_list(sorted(jobs_for_date(date), key=_id_sort_key)) or f"ไม่มีใบงานวันที่ {date}"
-        print(f"📋 Update {date or um.group(1)!r}")
-        _reply_text(configuration, event.reply_token, reply[:4900])
+            _remember_reply(event.reply_token, chat_id, conf)
         return
 
     ret = parse_return_command(received_text)
@@ -1653,11 +1650,11 @@ def handle_message(event):
         ok, result = return_plate(*ret, sender_id=user_id)
         if ok:
             print(f"📌 คืนป้าย {result['id']} วันที่ {result['date']}")
-            _remember_reply(event.reply_token, chat_id)
+            _remember_reply(event.reply_token, chat_id, conf)
         else:
             print(f"⚠️ {result}")
             try:
-                with ApiClient(configuration) as api_client:
+                with ApiClient(conf) as api_client:
                     MessagingApi(api_client).reply_message(ReplyMessageRequest(
                         reply_token=event.reply_token, messages=[TextMessage(text=f"⚠️ {result}")]))
             except Exception as e:
@@ -1670,14 +1667,14 @@ def handle_message(event):
         ok, result = cancel_job(received_text, sender_id=user_id)
         print(f"❌ ยกเลิกงาน {result['id']}" if ok else f"⚠️ ยกเลิกงานไม่สำเร็จ: {result}")
         if ok:
-            _remember_reply(event.reply_token, chat_id)
+            _remember_reply(event.reply_token, chat_id, conf)
         return
 
     plate = extract_plate(received_text)
     if plate:
         ok, _ = update_plate(received_text, plate, sender_id=user_id)
         if ok:
-            _remember_reply(event.reply_token, chat_id)
+            _remember_reply(event.reply_token, chat_id, conf)
         return
 
     if ("【客户订单号】" not in received_text and not is_voucher_format(received_text)
@@ -1688,15 +1685,15 @@ def handle_message(event):
     ok, result = add_job_to_queue(received_text, sender_id=user_id)
     print(f"✅ รับใบงาน {result['id']} เข้าคิว" if ok else f"⚠️ ไม่รับใบงาน: {result}")
     if ok:
-        _remember_reply(event.reply_token, chat_id)
+        _remember_reply(event.reply_token, chat_id, conf)
 
 
-def _remember_reply(token, chat_id):
+def _remember_reply(token, chat_id, conf=None):
     """เก็บ reply token ของข้อความล่าสุด ไว้ตอบใบสรุปกลับแชทนั้นโดยไม่เสียโควต้า"""
     global last_reply
     if token and chat_id:
         with state_lock:
-            last_reply = {"token": token, "chat_id": chat_id}
+            last_reply = {"token": token, "chat_id": chat_id, "conf": conf or configuration}
 
 
 # ====================== หน้าเว็บ / API ======================
