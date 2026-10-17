@@ -1000,7 +1000,7 @@
     // แถวกลุ่ม LINE: ส่ง = ส่งใบสรุปเข้ากลุ่ม, อ่าน = อ่านใบงานที่โพสต์ในกลุ่ม (ปิด = ส่งได้อย่างเดียว)
     function groupRowHtml(item) {
       const send = item.send !== false;
-      const read = item.read === true;
+      const read = item.read !== false;
       return `
         <div class="flex flex-wrap sm:flex-nowrap items-center gap-2 line-group-row p-2 bg-gray-50 rounded-lg border border-gray-100">
           <input type="text" placeholder="ชื่อกลุ่ม (เช่น กลุ่มรถ โซน A)" value="${escapeHtml(item.name || '')}" class="group-name-input w-full sm:w-1/3 rounded-lg border border-[#E2E8F0] px-3 py-2 text-xs outline-none focus:border-[#2563EB]">
@@ -1134,7 +1134,7 @@
           const container = document.getElementById('line-groups-container');
           document.getElementById('line-groups-empty').classList.add('hidden');
           const div = document.createElement('div');
-          div.innerHTML = groupRowHtml({ name: name, group_id: groupId, send: true, read: false });
+          div.innerHTML = groupRowHtml({ name: name, group_id: groupId, send: true, read: true });
           container.appendChild(div.firstElementChild);
           lucide.createIcons();
           closeDynamicModal();
