@@ -656,7 +656,7 @@
     let localJobs = {};
     let records = null;        // ข้อมูลล่าสุดจาก /api/records
     let recordsDate = "";      // วันที่ที่เลือกดู ("" = วันนี้)
-    const EVENT_LABELS = { new: "🆕 รับใบงานใหม่", amend: "✏️ แก้ไขใบงาน", duplicate: "♻️ ส่งซ้ำ (ไม่รับ)", plate: "🚗 ใส่ป้ายทะเบียน", return: "📌 คืนงาน", cancel: "❌ ยกเลิกงาน" };
+    const EVENT_LABELS = { new: "🆕 รับใบงานใหม่", amend: "✏️ แก้ไขใบงาน", duplicate: "♻️ ส่งซ้ำ (ไม่รับ)", plate: "🚗 ใส่ป้ายทะเบียน", return: "📌 คืนงาน", cancel: "❌ ยกเลิกงาน", price: "💰 แก้ไขราคา" };
 
     // คีย์ใบงาน = วันที่|รหัส|Order (รหัสเดียวกันต่างวันไม่ปนกัน)
     function jobKey(job) {
