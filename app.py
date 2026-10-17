@@ -1173,15 +1173,17 @@ def add_job_to_queue(text, sender_id=None):
         key = _job_key(job_item)
         if any(_job_key(j) == key for j in job_queue):
             log_activity("duplicate", job_item, "พบใบงานซ้ำในคิว (ไม่รับ)")
-            return False, "พบใบงานซ้ำในคิว (Order เดียวกัน)"
+            return False, "ℹ️ ใบงานนี้อยู่ในคิวแล้ว (Order เดียวกัน) รอบอทสรุปสักครู่"
 
         # เคยรับใบงานนี้แล้ว (Order เดียวกัน): ส่งซ้ำข้อความเดิมเป๊ะ = ไม่รับ ถ้าแก้ไขแล้ว = รับ แต่คงป้ายทะเบียน/📌 เดิมไว้
         prev = next((j for j in latest_jobs
                      if _job_key(j) == key and j.get("status") != "ยกเลิก"), None)
         if prev:
-            if prev.get("raw_text") == text and prev.get("status") == "ส่งแล้ว":
+            same_fields = all(str(prev.get(k, "")) == str(job_item.get(k, ""))
+                              for k in ("id", "date", "time", "pickup", "dropoff", "flight", "car_code", "price"))
+            if prev.get("raw_text") == text and prev.get("status") == "ส่งแล้ว" and same_fields:
                 log_activity("duplicate", prev, "ส่งข้อความเดิมซ้ำ (ไม่รับ)")
-                return False, "ใบงานนี้ส่งไปแล้ว (ข้อความเดิมซ้ำ)"
+                return False, "ℹ️ ใบงานนี้รับไว้แล้ว (ข้อความเดิมซ้ำ) สรุปล่าสุด:\n\n" + str(prev.get("formatted_summary", ""))
             if prev.get("plate"):
                 job_item["plate"] = prev["plate"]
                 job_item["formatted_summary"] = apply_plate(job_item["formatted_summary"], prev["plate"])
@@ -1997,6 +1999,8 @@ def _handle_text(event, conf):
     print(f"✅ รับใบงาน {result['id']} เข้าคิว" if ok else f"⚠️ ไม่รับใบงาน: {result}")
     if ok:
         _remember_reply(event.reply_token, chat_id, conf)
+    else:
+        _reply_long(conf, event.reply_token, str(result))
 
 
 def _remember_reply(token, chat_id, conf=None):
