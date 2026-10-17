@@ -241,9 +241,9 @@ CAR_PRICING_MAP = {
     "5S": {"code": "5S", "price": "380"},
     "7 SEAT": {"code": "7S", "price": "480"},
     "7S": {"code": "7S", "price": "480"},
-    "CAM/7S": {"code": "Cam/7S", "price": "480"},
-    "CAMRY/7S": {"code": "Cam/7S", "price": "480"},
-    "CAMRY OR 7SEAT": {"code": "Cam/7S", "price": "480"},
+    "CAM/7S": {"code": "Cam7S", "price": "480"},
+    "CAMRY/7S": {"code": "Cam7S", "price": "480"},
+    "CAMRY OR 7SEAT": {"code": "Cam7S", "price": "480"},
     "PREMIUM EV": {"code": "EV-SUV", "price": "450"},
     "EV-SUV": {"code": "EV-SUV", "price": "450"},
     "EV SUV": {"code": "EV-SUV", "price": "450"},
@@ -285,7 +285,7 @@ def _with_defaults(data):
     for grp in data["line_groups"]:
         if isinstance(grp, dict):
             grp.setdefault("send", True)   # ส่งใบสรุปเข้ากลุ่ม
-            grp.setdefault("read", False)  # อ่านใบงานที่โพสต์ในกลุ่ม (ปิด = ส่งได้อย่างเดียว)
+            grp.setdefault("read", True)   # อ่านใบงานที่โพสต์ในกลุ่ม (ปิด = บอทไม่อ่านงานในกลุ่มนั้น)
     data.setdefault("custom_keywords", [])
     data.setdefault("main_roads_dict", copy.deepcopy(DEFAULT_MAIN_ROADS_DICT))
     data.setdefault("major_areas_dict", copy.deepcopy(DEFAULT_MAJOR_AREAS_DICT))
@@ -1420,7 +1420,7 @@ def jobs_for_date(date):
     return out
 
 
-# ====================== คำสั่งในแชท: ปิดใบงาน / แก้ไขราคา / ตัดตาราง / NOW / พิมพ์ทะเบียนตรง ======================
+# ====================== คำสั่งในแชท: ปิดใบงาน / แก้ไขราคา / ตัดตาราง / NOW ======================
 def _reply_long(conf, reply_token, text):
     """ตอบข้อความยาว: แบ่งเป็นหลายข้อความ (ไม่เกิน 5) โดยตัดที่บรรทัดว่าง ใช้ reply จึงไม่เสียโควต้า"""
     chunks, cur = [], ""
@@ -1567,43 +1567,6 @@ def price_command(lines, sender_id=None):
     return "\n".join(results) or "ไม่พบรายการราคา เช่น\nแก้ไขราคา\nF01 +50\nF02 +100"
 
 
-_PLATE_LINE_RE = re.compile(r'^\s*([A-Za-z]+\d+)\s*\(([^()\n]+)\)')
-_DATE_HEAD_RE = re.compile(r'^\s*📅\s*(\S+)')
-
-
-def is_plate_lines(text):
-    return "【" not in text and any(_PLATE_LINE_RE.match(ln) for ln in text.splitlines())
-
-
-def plate_lines_command(text, sender_id=None):
-    """พิมพ์ทะเบียนตรง: 'VK01(9027)' / 'VK01(กต9027)' / 'VK01(กต 9027)' (หลายบรรทัดได้ วางตารางสรุปที่แก้ทะเบียนแล้วก็ได้)
-    บรรทัด '📅 18/10/2026' ในข้อความใช้เป็นวันที่ของบรรทัดถัดไป"""
-    cur_date, results = None, []
-    for ln in text.splitlines():
-        h = _DATE_HEAD_RE.match(ln)
-        if h:
-            cur_date = h.group(1)
-            continue
-        m = _PLATE_LINE_RE.match(ln)
-        if not m:
-            continue
-        job_id, plate = m.group(1), m.group(2).strip()
-        if not plate or plate in ("🥶", "🔥"):
-            continue
-        job, err = resolve_job(job_id, cur_date)
-        if err:
-            results.append(f"⚠️ {err}")
-            continue
-        with state_lock:
-            if job.get("plate") == plate and has_plate(job) == (plate != RETURN_MARK):
-                continue  # ทะเบียนเดิมอยู่แล้ว ข้าม
-            set_plate_manual(job, plate, "พิมพ์ทะเบียนตรง", sender_id)
-        results.append(f"✅ {job['id']}({plate})")
-    if results:
-        persist_state()
-    return results
-
-
 _CUT_RE = re.compile(r'^\s*ตัดตาราง\s*(.*?)\s*$')
 _NOW_RE = re.compile(r'^\s*(?:now|นาว)\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$', re.IGNORECASE)
 
@@ -1651,61 +1614,54 @@ HELP_TEXT = """📖 รายการคำสั่งของบอท
 ✅ ได้ ‼️NOW‼️ ตามด้วยใบสรุปของงานนั้น
 
 ━━━━━━━━━━━━━━
-4️⃣ ใส่ทะเบียน
-▶️ F01(9027)
-▶️ F01(กต9027)
-▶️ F01(กต 9027)
-✅ ใส่ทะเบียนในตาราง (พิมพ์หลายบรรทัดได้ หรือวางตารางที่แก้ทะเบียนแล้ว)
-
-━━━━━━━━━━━━━━
-5️⃣ ปิดใบงาน
+4️⃣ ปิดใบงาน
 ▶️ บรรทัดแรกพิมพ์  ใบงาน F01
 ▶️ บรรทัดถัดไปวางข้อมูลคนขับ (NAME / CAR NO / TEL / APP / TYPE CAR)
 ✅ ใส่ทะเบียน แล้วบอทตอบข้อมูลคนขับ + ใบงานต้นฉบับรวมกัน
 
 ━━━━━━━━━━━━━━
-6️⃣ ใส่ทะเบียนตามใบงานเดิม
+5️⃣ ใส่ทะเบียนตามใบงานเดิม
 ▶️ ข้อความ CAR NO : ... แล้วตามด้วยใบงานเดิม
 ✅ บอทหาใบงานจากเลข Order แล้วใส่ทะเบียนให้
 
 ━━━━━━━━━━━━━━
-7️⃣ คืนงาน (ป้าย 📌)
+6️⃣ คืนงาน (ป้าย 📌)
 ▶️ F22 คืน 16
 ▶️ F22 คืน 16/10
 ✅ เปลี่ยนป้ายงาน F22 ของวันที่ 16 เป็น 📌
 (รหัสซ้ำหลายวันแล้วไม่ใส่วัน บอทจะถามวัน)
 
 ━━━━━━━━━━━━━━
-8️⃣ คืนงานด้วยใบงานเต็ม
+7️⃣ คืนงานด้วยใบงานเต็ม
 ▶️ บรรทัดแรกพิมพ์  📌คืน
 ▶️ บรรทัดถัดไปวางใบงานเดิมทั้งใบ
 ✅ บอทหาจากเลข Order แล้วเปลี่ยนเป็น 📌
 
 ━━━━━━━━━━━━━━
-9️⃣ ยกเลิกงาน
+8️⃣ ยกเลิกงาน
 ▶️ วางใบงานเดิม แล้วเพิ่มบรรทัดสุดท้าย  cancel  (หรือ ยกเลิก)
 ✅ ในตารางจะเป็น  F09 ❌CANCEL❌
 
 ━━━━━━━━━━━━━━
-🔟 แก้ไขราคา
+9️⃣ แก้ไขราคา
 ▶️ บรรทัดแรกพิมพ์  แก้ไขราคา  (หรือ อัพเดทราคา)
 ▶️ บรรทัดถัดไป  F01 +50  /  F02 -30
 ✅ ราคาในตารางเป็น 380+50 (เก็บถาวร, +0 = ยกเลิกส่วนปรับ, ระบุวันได้ เช่น F01 18 +50)
 
 ━━━━━━━━━━━━━━
-1️⃣1️⃣ ขอ Group ID
+🔟 ขอ Group ID
 ▶️ id  (พิมพ์ในกลุ่ม)
 ✅ บอทตอบรหัสกลุ่ม
 
 ━━━━━━━━━━━━━━
-1️⃣2️⃣ ดูคำสั่งทั้งหมด
+1️⃣1️⃣ ดูคำสั่งทั้งหมด
 ▶️ help  /  คำสั่ง  /  เมนู
 ✅ แสดงรายการนี้
 
 ━━━━━━━━━━━━━━
-📝 ส่งใบงานตามปกติ บอทจะย่อให้อัตโนมัติและตอบกลับในแชทนี้
+📝 โยนใบงานเต็มในกลุ่มหรือแชทบอทได้เลย บอทย่อให้แล้วตอบกลับในที่ที่ส่งมา (ใช้ได้ทั้งกลุ่มและ LINE OA)
 📝 บอทตอบกลับในแชทที่พิมพ์เท่านั้น ไม่ส่งไปกลุ่มอื่น (ไม่เปลืองโควต้า)
-📝 คำสั่งแก้ข้อมูลในกลุ่ม ใช้ได้เฉพาะกลุ่มที่เปิด "อ่านใบงาน" ในหน้าเว็บ"""
+📝 กลุ่มไหนไม่อยากให้บอทอ่านใบงาน ไปเพิ่มกลุ่มในหน้า Settings แล้วเอาติ๊ก "อ่านใบงาน" ออก"""
 
 
 def _date_sort_key(d):
@@ -1949,13 +1905,13 @@ def _handle_text(event, conf):
         _reply_long(conf, event.reply_token, now_text(nm.group(1), nm.group(2)))
         return
 
-    # กลุ่มที่ไม่ได้เปิด "อ่านใบงาน" -> ห้ามอ่านงานในกลุ่มนั้น (ส่งใบสรุปได้อย่างเดียว)
+    # อ่านใบงานในทุกกลุ่มที่บอทอยู่ ยกเว้นกลุ่มที่ตั้งไว้ในหน้าเว็บแล้วเอาติ๊ก "อ่านใบงาน" ออก
     if source_type in ('group', 'room'):
         chat_id = getattr(event.source, 'group_id', None) or getattr(event.source, 'room_id', None)
         grp = next((g for g in load_settings().get("line_groups", [])
                     if str(g.get("group_id", "")).strip() == chat_id), None)
-        if not grp or not grp.get("read"):
-            print(f"🚫 ไม่อ่าน: กลุ่ม {chat_id} ยังไม่ได้เปิด 'อ่านใบงาน'")
+        if grp is not None and not grp.get("read", True):
+            print(f"🚫 ไม่อ่าน: กลุ่ม {chat_id} ปิด 'อ่านใบงาน' ไว้ในหน้าเว็บ")
             return
 
     chat_id = (getattr(event.source, 'group_id', None) or getattr(event.source, 'room_id', None)
@@ -1995,7 +1951,7 @@ def _handle_text(event, conf):
             _remember_reply(event.reply_token, chat_id, conf)
         return
 
-    # คำสั่งแก้ข้อมูล (ต้องอยู่ในกลุ่มที่เปิด "อ่านใบงาน" หรือแชทส่วนตัว): แก้ไขราคา / ปิดใบงาน / พิมพ์ทะเบียนตรง
+    # คำสั่งแก้ข้อมูล: แก้ไขราคา / ปิดใบงาน
     msg_lines = received_text.splitlines()
     first_line_text = msg_lines[0] if msg_lines else ""
     if _PRICE_HEAD_RE.match(first_line_text):
@@ -2008,13 +1964,6 @@ def _handle_text(event, conf):
         print(f"🔒 ปิดใบงาน {cl.group(1)}" if ok else f"⚠️ ปิดใบงานไม่สำเร็จ: {result}")
         _reply_long(conf, event.reply_token, result if ok else f"⚠️ {result}")
         return
-    if is_plate_lines(received_text):
-        plate_results = plate_lines_command(received_text, user_id)
-        print(f"🚗 พิมพ์ทะเบียนตรง {len(plate_results)} รายการ")
-        if plate_results:
-            _reply_long(conf, event.reply_token, "\n".join(plate_results))
-        return
-
     plate = extract_plate(received_text)
     if plate:
         ok, _ = update_plate(received_text, plate, sender_id=user_id)
