@@ -113,7 +113,9 @@ timer_thread = None
 timer_start_time = None
 latest_jobs = []
 last_sender_id = None
-last_reply = None  # {"token", "chat_id"} reply token ล่าสุด ใช้ตอบกลับแชทนั้นฟรี (ไม่นับโควต้า push)
+last_reply = {}  # chat_id -> {"token", "conf"} reply token ล่าสุดของแต่ละแชท ใช้ตอบกลับแชทนั้นฟรี (ไม่นับโควต้า push)
+# PUSH_ENABLED=1 = ส่งใบสรุปเข้ากลุ่ม/ผู้ส่งด้วย push แบบเดิม (เสียโควต้า) ค่าเริ่มต้น 0 = ตอบกลับ (reply) แชทที่พิมพ์มาเท่านั้น
+PUSH_ENABLED = os.getenv("PUSH_ENABLED", "0").strip() == "1"
 pending_update_dates = []  # วันที่ที่มีการอัปเดตป้ายทะเบียน รอส่งใบสรุปของวันนั้นใหม่
 MAX_HISTORY = 1000     # จำนวนใบงานสูงสุดที่เก็บในประวัติ
 KEEP_DAYS = 14         # เก็บใบงานย้อนหลังกี่วัน (ใบงานที่วันที่เก่ากว่านี้จะถูกตัดออก)
@@ -1166,6 +1168,9 @@ def add_job_to_queue(text, sender_id=None):
             if prev.get("plate"):
                 job_item["plate"] = prev["plate"]
                 job_item["formatted_summary"] = apply_plate(job_item["formatted_summary"], prev["plate"])
+            if prev.get("price_adj"):
+                job_item["price_adj"] = prev["price_adj"]
+                job_item["formatted_summary"] = apply_price_adj(job_item["formatted_summary"], prev["price_adj"])
             job_item["state"] = _job_state(prev)
             if job_item["state"] == "cancelled":
                 job_item["cancelled"] = True
@@ -1368,7 +1373,7 @@ def cancel_job(text, sender_id=None):
     return True, {"id": job_id, "cancelled": True}
 
 
-_UPDATE_RE = re.compile(r'^\s*(?:update|อัป?เดท|อัป?เดต)\s*(.*?)\s*$', re.IGNORECASE)
+_UPDATE_RE = re.compile(r'^\s*(?:update|อั[พป]?เด[ทต])\s*(.*?)\s*$', re.IGNORECASE)
 
 
 def parse_update_date(text):
@@ -1413,6 +1418,250 @@ def jobs_for_date(date):
         except Exception as e:
             print(f"⚠️ อ่านตาราง jobs ไม่สำเร็จ: {e}")
     return out
+
+
+# ====================== คำสั่งในแชท: ปิดใบงาน / แก้ไขราคา / ตัดตาราง / NOW / พิมพ์ทะเบียนตรง ======================
+def _reply_long(conf, reply_token, text):
+    """ตอบข้อความยาว: แบ่งเป็นหลายข้อความ (ไม่เกิน 5) โดยตัดที่บรรทัดว่าง ใช้ reply จึงไม่เสียโควต้า"""
+    chunks, cur = [], ""
+    for block in text.split("\n\n"):
+        piece = block if not cur else cur + "\n\n" + block
+        if len(piece) > 4900 and cur:
+            chunks.append(cur)
+            cur = block
+        else:
+            cur = piece
+    if cur:
+        chunks.append(cur)
+    chunks = [c[:4900] for c in chunks][:5]
+    try:
+        with ApiClient(conf) as api_client:
+            MessagingApi(api_client).reply_message(ReplyMessageRequest(
+                reply_token=reply_token, messages=[TextMessage(text=c) for c in chunks]))
+    except Exception as e:
+        print(f"⚠️ ตอบกลับไม่ได้: {e}")
+
+
+def resolve_job(job_id, date_text=None):
+    """หาใบงานจากรหัส (+วันที่ถ้าระบุ) คืน (job, ข้อความผิดพลาด)
+    รหัสซ้ำหลายวันและไม่ระบุวัน: ใช้ของวันนี้ถ้ามี ไม่งั้นให้ระบุวัน"""
+    job_id = job_id.strip().upper()
+    want = None
+    if date_text:
+        want = parse_update_date(date_text)
+        if want is None:
+            return None, f"อ่านวันที่ '{date_text}' ไม่ได้"
+    with state_lock:
+        seen, cands = set(), []
+        for j in latest_jobs:
+            if j.get("status") == "ยกเลิก" or str(j.get("id", "")).strip().upper() != job_id:
+                continue
+            d = _norm_job_date(j.get("date"))
+            if want and d != want:
+                continue
+            k = (d, _job_key(j))
+            if k in seen:
+                continue
+            seen.add(k)
+            cands.append(j)
+    if not cands:
+        return None, f"ไม่พบใบงาน {job_id}" + (f" ของวันที่ {want}" if want else "")
+    dates = sorted({_norm_job_date(j.get("date")) for j in cands}, key=_date_sort_key)
+    if len(dates) > 1:
+        today = now_th().strftime("%d/%m/%Y")
+        if today not in dates:
+            return None, f"{job_id} มีหลายวัน ({', '.join(dates)}) กรุณาระบุวัน เช่น {job_id} {dates[0][:2]}"
+        dates = [today]
+    return next(j for j in cands if _norm_job_date(j.get("date")) == dates[0]), None
+
+
+def _queue_compact_update(job, sender_id=None):
+    """ใบงานที่ส่งไปแล้วถูกแก้ -> ส่งรายการย่อของวันนั้นใหม่ (เรียกตอนถือ state_lock)"""
+    global last_sender_id
+    if any(j is job for j in job_queue) or job.get("status") == "รอส่ง":
+        return
+    d = _norm_job_date(job.get("date"))
+    if d not in pending_update_dates:
+        pending_update_dates.append(d)
+    if sender_id:
+        last_sender_id = sender_id
+    _ensure_timer()
+
+
+def apply_price_adj(summary, adj):
+    """ใส่ส่วนปรับราคาต่อท้ายราคา: /380#... -> /380+50#..."""
+    first, sep, rest = summary.partition("\n")
+    adj_str = f"{adj:+d}" if adj else ""
+    first = re.sub(r'/(\d+)(?:[+-]\d+)?#', lambda m: f"/{m.group(1)}{adj_str}#", first, count=1)
+    return first + sep + rest
+
+
+def set_price_adj(job, adj, sender_id=None):
+    job["price_adj"] = adj
+    job["formatted_summary"] = apply_price_adj(job["formatted_summary"], adj)
+    mark_job(job, "price", f"{adj:+d}" if adj else "ยกเลิกส่วนปรับราคา")
+    _queue_compact_update(job, sender_id)
+
+
+_EMOJI_MARKS = ("🥶", "🔥", "📌")
+
+
+def has_plate(job):
+    """มีทะเบียนแล้วไหม: ในวงเล็บแรกของสรุปมีข้อความที่ไม่ใช่ 🥶 / 🔥 / 📌 (รองรับ 9027, กต9027, กต 9027)"""
+    m = re.match(r'^[^(\n]*\(([^)\n]*)\)', str(job.get("formatted_summary", "")))
+    content = m.group(1).strip() if m else ""
+    return bool(content) and content not in _EMOJI_MARKS
+
+
+def set_plate_manual(job, plate, detail, sender_id=None):
+    job["plate"] = plate
+    job["formatted_summary"] = apply_plate(job["formatted_summary"], plate)
+    mark_job(job, "return" if plate == RETURN_MARK else "plate", f"{plate} ({detail})")
+    _queue_compact_update(job, sender_id)
+
+
+_CLOSE_RE = re.compile(r'^\s*(?:ปิด)?ใบงาน\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$')
+
+
+def close_job(job_id, date_text, block, sender_id=None):
+    """ปิดใบงาน: ข้อมูลคนขับ (มี CAR NO) -> ใส่ทะเบียนในใบงาน และคืน 'ข้อมูลคนขับ + ใบงานต้นฉบับ'"""
+    plate = extract_plate(block)
+    if not plate:
+        return False, "ไม่พบบรรทัด CAR NO : ... ในข้อความ"
+    job, err = resolve_job(job_id, date_text)
+    if err:
+        return False, err
+    with state_lock:
+        set_plate_manual(job, plate, "ปิดใบงาน", sender_id)
+        original = job.get("text") or job.get("raw_text") or job.get("formatted_summary", "")
+    persist_state()
+    return True, block.strip() + "\n\n" + str(original).strip()
+
+
+_PRICE_HEAD_RE = re.compile(r'^\s*(?:แก้ไข|อั[พป]?เด[ทต])ราคา\s*$')
+_PRICE_LINE_RE = re.compile(
+    r'^\s*([A-Za-z]+\d+)\s*(?:(\d{1,2}(?:[/\-.]\d{1,2}(?:[/\-.]\d{2,4})?)?)\s+)?([+-])\s*(\d+)\s*$')
+
+
+def price_command(lines, sender_id=None):
+    """แก้ไขราคา: แต่ละบรรทัด 'F01 +50' (หรือ 'F01 17/10 +50') ตั้งส่วนปรับราคาของใบงานนั้น เก็บถาวรในใบงาน"""
+    results = []
+    for ln in lines:
+        if not ln.strip():
+            continue
+        m = _PRICE_LINE_RE.match(ln)
+        if not m:
+            results.append(f"⚠️ อ่านไม่ออก: {ln.strip()}")
+            continue
+        job_id, date_text, sign, num = m.groups()
+        job, err = resolve_job(job_id, date_text)
+        if err:
+            results.append(f"⚠️ {err}")
+            continue
+        adj = int(num) * (1 if sign == "+" else -1)
+        with state_lock:
+            set_price_adj(job, adj, sender_id)
+            first = str(job["formatted_summary"]).splitlines()[0]
+        results.append(f"✅ {first}")
+    persist_state()
+    return "\n".join(results) or "ไม่พบรายการราคา เช่น\nแก้ไขราคา\nF01 +50\nF02 +100"
+
+
+_PLATE_LINE_RE = re.compile(r'^\s*([A-Za-z]+\d+)\s*\(([^()\n]+)\)')
+_DATE_HEAD_RE = re.compile(r'^\s*📅\s*(\S+)')
+
+
+def is_plate_lines(text):
+    return "【" not in text and any(_PLATE_LINE_RE.match(ln) for ln in text.splitlines())
+
+
+def plate_lines_command(text, sender_id=None):
+    """พิมพ์ทะเบียนตรง: 'VK01(9027)' / 'VK01(กต9027)' / 'VK01(กต 9027)' (หลายบรรทัดได้ วางตารางสรุปที่แก้ทะเบียนแล้วก็ได้)
+    บรรทัด '📅 18/10/2026' ในข้อความใช้เป็นวันที่ของบรรทัดถัดไป"""
+    cur_date, results = None, []
+    for ln in text.splitlines():
+        h = _DATE_HEAD_RE.match(ln)
+        if h:
+            cur_date = h.group(1)
+            continue
+        m = _PLATE_LINE_RE.match(ln)
+        if not m:
+            continue
+        job_id, plate = m.group(1), m.group(2).strip()
+        if not plate or plate in ("🥶", "🔥"):
+            continue
+        job, err = resolve_job(job_id, cur_date)
+        if err:
+            results.append(f"⚠️ {err}")
+            continue
+        with state_lock:
+            if job.get("plate") == plate and has_plate(job) == (plate != RETURN_MARK):
+                continue  # ทะเบียนเดิมอยู่แล้ว ข้าม
+            set_plate_manual(job, plate, "พิมพ์ทะเบียนตรง", sender_id)
+        results.append(f"✅ {job['id']}({plate})")
+    if results:
+        persist_state()
+    return results
+
+
+_CUT_RE = re.compile(r'^\s*ตัดตาราง\s*(.*?)\s*$')
+_NOW_RE = re.compile(r'^\s*(?:now|นาว)\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$', re.IGNORECASE)
+
+
+def cut_table_text(date_text):
+    """ตัดตาราง: ใบสรุปเต็มเฉพาะงานที่ยังไม่มีทะเบียน (รวมงานที่คืน 📌) ไม่รวมงานที่ยกเลิก"""
+    date = parse_update_date(date_text)
+    if date is None:
+        return "รูปแบบ: ตัดตาราง หรือ ตัดตาราง 18 หรือ ตัดตาราง 18/10"
+    jobs = [j for j in sorted(jobs_for_date(date), key=_id_sort_key)
+            if _job_state(j) != "cancelled" and not has_plate(j)]
+    if not jobs:
+        return f"📅 {date}\n\nทุกงานมีทะเบียนแล้ว ✅"
+    return f"📅 {date}\n\n" + "\n\n".join(str(j["formatted_summary"]).strip() for j in jobs)
+
+
+def now_text(job_id, date_text):
+    job, err = resolve_job(job_id, date_text)
+    if err:
+        return f"⚠️ {err}"
+    return "‼️NOW‼️\n\n" + str(job["formatted_summary"]).strip()
+
+
+_HELP_RE = re.compile(r'^\s*(?:/?help|\?|คำสั่ง(?:ทั้งหมด)?|เมนู|วิธีใช้|ช่วยเหลือ)\s*$', re.IGNORECASE)
+
+HELP_TEXT = """📖 คำสั่งของบอท
+
+【ส่งใบงาน】
+ส่งใบงานเข้ามาตามปกติ บอทย่อให้แล้วตอบกลับในแชทนี้ (รองรับใบงานทุกแบบ)
+
+【ดูข้อมูล】
+• Update — ตารางสรุปย่อของวันนี้
+  Update 18 / Update 18/10 / Update พรุ่งนี้ — ระบุวัน
+• ตัดตาราง — ใบสรุปเต็มเฉพาะงานที่ยังไม่มีทะเบียน (ระบุวันได้ เช่น ตัดตาราง 18)
+• now F01 หรือ นาว f01 — ดีดงานนั้นเป็น ‼️NOW‼️
+• id — ขอ Group ID (พิมพ์ในกลุ่ม)
+• help หรือ คำสั่ง — แสดงเมนูนี้
+
+【ทะเบียน】
+• F01(9027) หรือ F01(กต 9027) — ใส่ทะเบียนให้งานนั้น (พิมพ์หลายบรรทัดได้ หรือวางตารางสรุปที่แก้ทะเบียนแล้ว)
+• ใบงาน F01 แล้วขึ้นบรรทัดใหม่ตามด้วยข้อมูลคนขับ (NAME / CAR NO / TEL / APP / TYPE CAR) — ปิดใบงาน: ใส่ทะเบียน แล้วบอทตอบข้อมูลคนขับ + ใบงานต้นฉบับรวมกัน
+• CAR NO : ... ตามด้วยใบงานเดิม — ใส่ทะเบียนตามเลข Order
+
+【คืนงาน / ยกเลิก】
+• F22 คืน 16 — คืนงาน F22 ของวันที่ 16 (ป้ายเป็น 📌) ถ้าไม่ระบุวันและมีหลายวัน บอทจะถามวัน
+• 📌คืน แล้วตามด้วยใบงานเดิมทั้งใบ — คืนงานตามเลข Order
+• ใบงานเดิม + บรรทัด cancel (หรือ ยกเลิก) — ยกเลิกงาน ในตารางจะเป็น F09 ❌CANCEL❌
+
+【ราคา】
+แก้ไขราคา
+F01 +50
+F02 -30
+— ปรับราคาต่อท้ายในตาราง เช่น 380+50 (เก็บถาวร, +0 = ยกเลิกส่วนปรับ, ระบุวันได้ เช่น F01 18 +50)
+
+หมายเหตุ
+• บอทตอบกลับในแชทที่พิมพ์เท่านั้น (ไม่ส่งไปกลุ่มอื่น) เพื่อไม่เปลืองโควต้า
+• รหัสซ้ำหลายวัน ถ้าไม่ระบุวัน บอทใช้ของวันนี้ ถ้าไม่มีของวันนี้จะถามให้ระบุวัน
+• ในกลุ่ม คำสั่งแก้ข้อมูลใช้ได้เฉพาะกลุ่มที่เปิด "อ่านใบงาน" ในหน้าเว็บ"""
 
 
 def _date_sort_key(d):
@@ -1494,8 +1743,8 @@ def process_batch_jobs():
         if today_str in list_dates and tomorrow_str not in list_dates:
             list_dates.append(tomorrow_str)
         target_sender_id = last_sender_id
-        reply = last_reply
-        last_reply = None
+        replies = dict(last_reply)
+        last_reply = {}
         # เคลียร์คิวทันที ใบงานใหม่ที่เข้ามาระหว่างส่งจะเริ่มรอบใหม่ได้เลย
         job_queue = []
         pending_update_dates = []
@@ -1525,37 +1774,53 @@ def process_batch_jobs():
         summary_text = generate_batch_summary(to_send)
         list_text = generate_compact_list(all_day_jobs)
         if summary_text or list_text:
-            settings = load_settings()
-            active_groups = [g for g in settings.get("line_groups", [])
-                             if g.get("group_id") and g.get("send", True)]
-            targets = []
-            if target_sender_id:
-                targets.append(("ผู้ส่ง (LINE OA)", target_sender_id))
-            for grp in active_groups:
-                targets.append((f"กลุ่ม {grp.get('name')}", grp.get("group_id")))
-
-            print(f"📤 ส่งใบสรุปไปยัง: {[(l, str(t)[:8] + '…') for l, t in targets]} "
-                  f"(กลุ่มที่ติ๊กส่ง {len(active_groups)} จาก {len(settings.get('line_groups', []))})")
             # LINE จำกัด 5000 ตัวอักษรต่อข้อความ
             chunks = [summary_text[i:i + 4900] for i in range(0, len(summary_text), 4900)][:4]
             # ข้อความเพิ่มเติม: รายการย่อของใบงานทั้งวัน (เฉพาะบรรทัดแรกของแต่ละใบงาน)
             if list_text:
                 chunks.append(list_text[:4900])
             results = []
-            for label, to in targets:
-                messages = [TextMessage(text=c) for c in chunks]
-                # แชทที่ส่งใบงานมา: ตอบด้วย reply ก่อน (ฟรี) ถ้าไม่ได้ค่อยใช้ push
-                if reply and reply["chat_id"] == to:
-                    token, reply_conf, reply = reply["token"], reply.get("conf") or configuration, None
+
+            if not PUSH_ENABLED:
+                # โหมดประหยัดโควต้า: ตอบกลับ (reply) เฉพาะแชทที่พิมพ์มา ไม่ส่งเข้ากลุ่มอื่น ไม่ push
+                if not replies:
+                    print("ℹ️ โหมดตอบกลับอย่างเดียว: ไม่มีแชทให้ตอบ (ไม่ push) ดูผลได้ด้วยคำสั่ง Update")
+                for chat_id, rep in replies.items():
+                    label = f"แชท {str(chat_id)[:8]}…"
                     try:
-                        with ApiClient(reply_conf) as api_client:
-                            MessagingApi(api_client).reply_message(
-                                ReplyMessageRequest(reply_token=token, messages=messages))
+                        with ApiClient(rep.get("conf") or configuration) as api_client:
+                            MessagingApi(api_client).reply_message(ReplyMessageRequest(
+                                reply_token=rep["token"], messages=[TextMessage(text=c) for c in chunks]))
+                        print(f"✅ ตอบกลับ {label} สำเร็จ")
                         results.append((label, True, "reply"))
-                        continue
                     except Exception as e:
-                        print(f"⚠️ ตอบกลับ {label} ด้วย reply ไม่ได้ ลองใช้ push แทน: {e}")
-                results.append((label, push_with_fallback(to, messages, label), "push"))
+                        print(f"❌ ตอบกลับ {label} ไม่ได้ (reply token อาจหมดอายุ): {e}")
+                        results.append((label, False, "reply"))
+            else:
+                settings = load_settings()
+                active_groups = [g for g in settings.get("line_groups", [])
+                                 if g.get("group_id") and g.get("send", True)]
+                targets = []
+                if target_sender_id:
+                    targets.append(("ผู้ส่ง (LINE OA)", target_sender_id))
+                for grp in active_groups:
+                    targets.append((f"กลุ่ม {grp.get('name')}", grp.get("group_id")))
+                print(f"📤 ส่งใบสรุปไปยัง: {[(l, str(t)[:8] + '…') for l, t in targets]} "
+                      f"(กลุ่มที่ติ๊กส่ง {len(active_groups)} จาก {len(settings.get('line_groups', []))})")
+                for label, to in targets:
+                    messages = [TextMessage(text=c) for c in chunks]
+                    # แชทที่ส่งใบงานมา: ตอบด้วย reply ก่อน (ฟรี) ถ้าไม่ได้ค่อยใช้ push
+                    rep = replies.pop(to, None)
+                    if rep:
+                        try:
+                            with ApiClient(rep.get("conf") or configuration) as api_client:
+                                MessagingApi(api_client).reply_message(
+                                    ReplyMessageRequest(reply_token=rep["token"], messages=messages))
+                            results.append((label, True, "reply"))
+                            continue
+                        except Exception as e:
+                            print(f"⚠️ ตอบกลับ {label} ด้วย reply ไม่ได้ ลองใช้ push แทน: {e}")
+                    results.append((label, push_with_fallback(to, messages, label), "push"))
 
             if summary_text:
                 log_sent("summary", summary_text, sorted({_norm_job_date(j.get("date")) for j in to_send}), results)
@@ -1621,7 +1886,23 @@ def _handle_text(event, conf):
         else:
             reply = generate_compact_list(sorted(jobs_for_date(date), key=_id_sort_key)) or f"ไม่มีใบงานวันที่ {date}"
         print(f"📋 Update {date or um.group(1)!r}")
-        _reply_text(conf, event.reply_token, reply[:4900])
+        _reply_long(conf, event.reply_token, reply)
+        return
+
+    # คำสั่งอ่านอย่างเดียว (ใช้ได้ทุกกลุ่มที่บอทอยู่): help / ตัดตาราง / NOW
+    if _HELP_RE.match(received_text):
+        print("📖 help")
+        _reply_long(conf, event.reply_token, HELP_TEXT)
+        return
+    cm = _CUT_RE.match(received_text)
+    if cm:
+        print(f"✂️ ตัดตาราง {cm.group(1)!r}")
+        _reply_long(conf, event.reply_token, cut_table_text(cm.group(1)))
+        return
+    nm = _NOW_RE.match(received_text)
+    if nm:
+        print(f"‼️ NOW {nm.group(1)}")
+        _reply_long(conf, event.reply_token, now_text(nm.group(1), nm.group(2)))
         return
 
     # กลุ่มที่ไม่ได้เปิด "อ่านใบงาน" -> ห้ามอ่านงานในกลุ่มนั้น (ส่งใบสรุปได้อย่างเดียว)
@@ -1670,6 +1951,26 @@ def _handle_text(event, conf):
             _remember_reply(event.reply_token, chat_id, conf)
         return
 
+    # คำสั่งแก้ข้อมูล (ต้องอยู่ในกลุ่มที่เปิด "อ่านใบงาน" หรือแชทส่วนตัว): แก้ไขราคา / ปิดใบงาน / พิมพ์ทะเบียนตรง
+    msg_lines = received_text.splitlines()
+    first_line_text = msg_lines[0] if msg_lines else ""
+    if _PRICE_HEAD_RE.match(first_line_text):
+        print("💰 แก้ไขราคา")
+        _reply_long(conf, event.reply_token, price_command(msg_lines[1:], user_id))
+        return
+    cl = _CLOSE_RE.match(first_line_text)
+    if cl and len(msg_lines) > 1 and extract_plate(received_text):
+        ok, result = close_job(cl.group(1), cl.group(2), "\n".join(msg_lines[1:]), user_id)
+        print(f"🔒 ปิดใบงาน {cl.group(1)}" if ok else f"⚠️ ปิดใบงานไม่สำเร็จ: {result}")
+        _reply_long(conf, event.reply_token, result if ok else f"⚠️ {result}")
+        return
+    if is_plate_lines(received_text):
+        plate_results = plate_lines_command(received_text, user_id)
+        print(f"🚗 พิมพ์ทะเบียนตรง {len(plate_results)} รายการ")
+        if plate_results:
+            _reply_long(conf, event.reply_token, "\n".join(plate_results))
+        return
+
     plate = extract_plate(received_text)
     if plate:
         ok, _ = update_plate(received_text, plate, sender_id=user_id)
@@ -1693,7 +1994,7 @@ def _remember_reply(token, chat_id, conf=None):
     global last_reply
     if token and chat_id:
         with state_lock:
-            last_reply = {"token": token, "chat_id": chat_id, "conf": conf or configuration}
+            last_reply[chat_id] = {"token": token, "conf": conf or configuration}
 
 
 # ====================== หน้าเว็บ / API ======================
