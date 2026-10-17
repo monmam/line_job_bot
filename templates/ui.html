@@ -326,6 +326,12 @@
        </div>
       </div>
 
+      <div class="mb-3 flex flex-wrap items-center gap-2">
+        <button type="button" class="export-day rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">⬇️ Excel (วันที่เลือก)</button>
+        <button type="button" class="export-all rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">⬇️ Excel (ทั้งหมด)</button>
+        <button type="button" class="export-sheets rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">📤 ส่งไป Google Sheet</button>
+      </div>
+
       <!-- Responsive Table Container -->
       <div class="page-card overflow-hidden">
        <div class="overflow-x-auto w-full">
@@ -362,7 +368,12 @@
         <h1 class="m-0 text-xl md:text-2xl font-bold tracking-tight text-[#0F172A]">บันทึกใบงาน</h1>
         <p class="mt-1 text-xs md:text-sm font-semibold text-[#64748B]">ข้อมูลทั้งหมดแยกตามวันที่: ใบงานเต็ม ใบงานย่อ คืนงาน ยกเลิกงาน และประวัติการส่ง</p>
        </div>
-       <select id="records-date" class="rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs outline-none focus:border-[#2563EB] text-[#334155]"></select>
+       <div class="flex flex-wrap items-center gap-2">
+        <select id="records-date" class="rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs outline-none focus:border-[#2563EB] text-[#334155]"></select>
+        <button type="button" class="export-day rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">⬇️ Excel (วันที่เลือก)</button>
+        <button type="button" class="export-all rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">⬇️ Excel (ทั้งหมด)</button>
+        <button type="button" class="export-sheets rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">📤 ส่งไป Google Sheet</button>
+       </div>
       </div>
 
       <div id="records-tabs" class="mb-4 flex flex-wrap gap-2 text-xs">
@@ -1412,6 +1423,22 @@
 
       setInterval(fetchDashboardData, 5000);
       setInterval(() => fetchRecords(), 15000);
+
+      document.querySelectorAll('.export-day').forEach(b => b.addEventListener('click', () => {
+        const d = (records && records.date) || '';
+        window.location.href = '/api/export.xlsx' + (d ? '?from=' + encodeURIComponent(d) + '&to=' + encodeURIComponent(d) : '');
+      }));
+      document.querySelectorAll('.export-all').forEach(b => b.addEventListener('click', () => { window.location.href = '/api/export.xlsx'; }));
+      document.querySelectorAll('.export-sheets').forEach(b => b.addEventListener('click', async () => {
+        showToast('กำลังส่งออกไป Google Sheet...');
+        try {
+          const res = await fetch('/api/export_sheets', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+          const data = await res.json();
+          showToast(data.message || (data.success ? 'ส่งออกแล้ว' : 'ส่งออกไม่สำเร็จ'));
+        } catch (e) {
+          showToast('ส่งออกไม่สำเร็จ: เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+        }
+      }));
 
       ['date-filter', 'records-date'].forEach(id => {
         document.getElementById(id).addEventListener('change', e => fetchRecords(e.target.value));
