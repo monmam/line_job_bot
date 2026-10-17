@@ -7,7 +7,7 @@ import threading
 import datetime
 
 import requests
-from flask import Flask, request, abort, render_template, jsonify
+from flask import Flask, request, abort, render_template, jsonify, send_file
 from dotenv import load_dotenv
 
 # Import LINE SDK (v3)
@@ -928,7 +928,7 @@ def _parse_kv(raw_text):
 
 
 _WEEKDAY_DATE_RE = re.compile(r'^(?:[A-Za-z]+,\s*)?(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})$')
-_ROUTE_LINE_RE = re.compile(r'^[A-Za-z]{3}\s*-\s*[A-Za-z ]+$')
+_ROUTE_LINE_RE = re.compile(r'^[A-Za-z][A-Za-z ]*\s-\s[A-Za-z][A-Za-z ]*$')  # เช่น BKK - Don Mueang / Pak Kret District - DMK
 _FLIGHT_SPACED_RE = re.compile(r'^([A-Za-z0-9]{2})\s*-\s*(\d{1,4})$')
 
 
@@ -2241,6 +2241,175 @@ def api_clear_queue():
                 job["status"] = "ยกเลิก"
     persist_state()
     return jsonify({"success": True, "num_cleared": num_cleared, "message": "ล้าง Queue เรียบร้อยแล้ว"})
+
+
+# ====================== ส่งออกข้อมูล (Excel / Google Sheet) ======================
+EXPORT_HEADERS = ["วันที่", "รหัส", "เวลา", "จุดรับ", "จุดส่ง", "เที่ยวบิน", "Order", "รถ", "ราคา", "ปรับราคา",
+                  "ทะเบียน", "สถานะส่ง", "สถานะงาน", "ใบสรุป", "ข้อความต้นฉบับ"]
+_STATE_TH = {"normal": "ปกติ", "returned": "คืนงาน", "cancelled": "ยกเลิก"}
+
+
+def _parse_export_date(text):
+    """รับ dd/mm/yyyy หรือ yyyy-mm-dd (จากช่องวันที่ของเบราว์เซอร์) คืน dd/mm/yyyy หรือ None"""
+    text = (text or "").strip()
+    if not text:
+        return None
+    m = re.match(r'^(\d{4})-(\d{2})-(\d{2})$', text)
+    if m:
+        return f"{m.group(3)}/{m.group(2)}/{m.group(1)}"
+    return parse_update_date(text)
+
+
+def collect_export_jobs(date_from=None, date_to=None):
+    """ใบงานทั้งหมด (ตาราง jobs ใน Supabase + ที่อยู่ในระบบ) ไม่ซ้ำ เรียงวันที่แล้วรหัส"""
+    by_uid = {}
+    if storage.using_supabase():
+        params = {"select": "*", "order": "job_date.asc", "limit": "20000"}
+        a, b = _iso_date(date_from) if date_from else None, _iso_date(date_to) if date_to else None
+        if a and b:
+            params["and"] = f"(job_date.gte.{a},job_date.lte.{b})"
+        elif a:
+            params["job_date"] = f"gte.{a}"
+        elif b:
+            params["job_date"] = f"lte.{b}"
+        try:
+            for j in _rows_to_jobs(storage.select_rows("jobs", params)):
+                by_uid[f"{_norm_job_date(j.get('date'))}|{_job_key(j)}"] = j
+        except Exception as e:
+            print(f"⚠️ อ่านตาราง jobs เพื่อส่งออกไม่สำเร็จ (ใช้เฉพาะข้อมูลในระบบ): {e}")
+    with state_lock:
+        for j in reversed(latest_jobs):  # ข้อมูลในระบบใหม่กว่า ทับของในตาราง
+            if j.get("status") == "ยกเลิก":
+                continue
+            item = dict(j)
+            item["state"] = _job_state(j)
+            by_uid[f"{_norm_job_date(j.get('date'))}|{_job_key(j)}"] = item
+    lo = _date_sort_key(date_from) if date_from else None
+    hi = _date_sort_key(date_to) if date_to else None
+    jobs = []
+    for j in by_uid.values():
+        d = _date_sort_key(_norm_job_date(j.get("date")))
+        if (lo and d < lo) or (hi and d > hi):
+            continue
+        jobs.append(j)
+    jobs.sort(key=lambda j: (_date_sort_key(_norm_job_date(j.get("date"))), _id_sort_key(j)))
+    return jobs
+
+
+def _job_export_row(j):
+    adj = j.get("price_adj")
+    return [
+        _norm_job_date(j.get("date")), j.get("id", ""), j.get("time", ""),
+        j.get("pickup", ""), j.get("dropoff", ""), j.get("flight", ""), j.get("order", ""),
+        j.get("car_code", ""), j.get("price", ""), f"{adj:+d}" if adj else "",
+        j.get("plate", "") or "", j.get("status", ""), _STATE_TH.get(_job_state(j), ""),
+        j.get("formatted_summary", ""), j.get("text") or j.get("raw_text") or "",
+    ]
+
+
+def _compact_rows(jobs):
+    return [[_norm_job_date(j.get("date")), j.get("id", ""), str(j.get("formatted_summary", "")).split("\n")[0]]
+            for j in jobs if j.get("status") != "ยกเลิก"]
+
+
+def _export_tables(jobs):
+    """ชื่อชีต -> (หัวตาราง, แถว) ใช้ทั้ง Excel และ Google Sheet"""
+    dates = {_norm_job_date(j.get("date")) for j in jobs}
+    with state_lock:
+        activity = [a for a in _activity_log if not a.get("date") or a["date"] in dates]
+        sent = [x for x in _sent_log if any(d in dates for d in x.get("dates", []))]
+    rows = [_job_export_row(j) for j in jobs]
+    returned = [r for r, j in zip(rows, jobs) if _job_state(j) == "returned"]
+    cancelled = [r for r, j in zip(rows, jobs) if _job_state(j) == "cancelled"]
+    return {
+        "ใบงานทั้งหมด": (EXPORT_HEADERS, rows),
+        "ใบงานย่อ": (["วันที่", "รหัส", "ใบงานย่อ"], _compact_rows(jobs)),
+        "คืนงาน": (EXPORT_HEADERS, returned),
+        "ยกเลิก": (EXPORT_HEADERS, cancelled),
+        "บันทึกเหตุการณ์": (["เวลา", "เหตุการณ์", "รหัส", "วันที่", "Order", "รายละเอียด"],
+                            [[a.get("ts", ""), a.get("type", ""), a.get("id", ""), a.get("date", ""),
+                              a.get("order", ""), a.get("detail", "")] for a in activity]),
+        "ประวัติการส่ง": (["เวลา", "ชนิด", "วันที่ของใบงาน", "ปลายทาง", "ข้อความ"],
+                          [[x.get("ts", ""), "ใบงานย่อ" if x.get("kind") == "compact" else "ใบสรุป",
+                            ", ".join(x.get("dates", [])),
+                            ", ".join(f"{t['to']}({'ok' if t['ok'] else 'fail'})" for t in x.get("targets", [])),
+                            x.get("text", "")] for x in sent]),
+    }
+
+
+def build_export_xlsx(jobs):
+    from openpyxl import Workbook
+    from openpyxl.styles import Alignment, Font, PatternFill
+    from openpyxl.utils import get_column_letter
+    wb = Workbook()
+    wb.remove(wb.active)
+    for name, (headers, rows) in _export_tables(jobs).items():
+        ws = wb.create_sheet(name)
+        ws.append(headers)
+        for r in rows:
+            ws.append([str(c) if c is not None else "" for c in r])
+        for cell in ws[1]:
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill("solid", fgColor="2563EB")
+            cell.alignment = Alignment(vertical="center")
+        ws.freeze_panes = "A2"
+        for idx, h in enumerate(headers, start=1):
+            longest = max([len(str(h))] + [len(str(r[idx - 1]).split("\n")[0]) for r in rows[:300]]) if rows else len(str(h))
+            ws.column_dimensions[get_column_letter(idx)].width = min(max(10, longest + 2), 60)
+        if rows:
+            ws.auto_filter.ref = ws.dimensions
+    import io
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
+
+
+@app.route("/api/export.xlsx", methods=["GET"])
+def api_export_xlsx():
+    """ดาวน์โหลดใบงานเป็น Excel: ?from=...&to=... (ไม่ใส่ = ทั้งหมด) รับ dd/mm/yyyy หรือ yyyy-mm-dd"""
+    date_from = _parse_export_date(request.args.get("from"))
+    date_to = _parse_export_date(request.args.get("to"))
+    jobs = collect_export_jobs(date_from, date_to)
+    tag = (date_from or "all").replace("/", "-") + (f"_to_{date_to.replace('/', '-')}" if date_to and date_to != date_from else "")
+    try:
+        buf = build_export_xlsx(jobs)
+    except ImportError:
+        import csv, io
+        out = io.StringIO()
+        w = csv.writer(out)
+        w.writerow(EXPORT_HEADERS)
+        w.writerows(_job_export_row(j) for j in jobs)
+        data = io.BytesIO(("﻿" + out.getvalue()).encode("utf-8"))
+        return send_file(data, mimetype="text/csv", as_attachment=True, download_name=f"jobs_{tag}.csv")
+    return send_file(buf, as_attachment=True, download_name=f"jobs_{tag}.xlsx",
+                     mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+
+@app.route("/api/export_sheets", methods=["POST"])
+def api_export_sheets():
+    """ส่งออกไป Google Sheet (สเปรดชีตเดียวกับที่บันทึกใบงาน) เป็นชีตใหม่ EXPORT_xxx ล้างแล้วเขียนใหม่ทุกครั้ง"""
+    if not GOOGLE_SPREADSHEET_ID:
+        return jsonify({"success": False, "message": "ยังไม่ได้ตั้งค่า GOOGLE_SPREADSHEET_ID"}), 400
+    client = get_sheet_client()
+    if not client:
+        return jsonify({"success": False, "message": "เชื่อมต่อ Google Sheets ไม่ได้ (เช็ค credentials.json)"}), 400
+    data = request.get_json(silent=True) or {}
+    jobs = collect_export_jobs(_parse_export_date(data.get("from")), _parse_export_date(data.get("to")))
+    try:
+        spreadsheet = client.open_by_key(GOOGLE_SPREADSHEET_ID)
+        for name, (headers, rows) in _export_tables(jobs).items():
+            title = f"EXPORT_{name}"
+            try:
+                ws = spreadsheet.worksheet(title)
+                ws.clear()
+            except Exception:
+                ws = spreadsheet.add_worksheet(title=title, rows=max(100, len(rows) + 10), cols=max(10, len(headers)))
+            ws.resize(rows=max(100, len(rows) + 10), cols=max(10, len(headers)))
+            ws.update(values=[headers] + [[str(c) if c is not None else "" for c in r] for r in rows], range_name="A1")
+        return jsonify({"success": True, "message": f"ส่งออก {len(jobs)} ใบงานไป Google Sheet แล้ว (ชีต EXPORT_...)"})
+    except Exception as e:
+        return jsonify({"success": False, "message": f"ส่งออกไม่สำเร็จ: {e}"}), 500
 
 
 # ====================== กันเซิร์ฟเวอร์หลับ (Render Free) ======================
