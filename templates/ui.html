@@ -48,6 +48,15 @@
     .original-content { display: none; }
     .original-content.open { display: block; }
     .rec-tab.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+    .sw { position: relative; display: inline-block; width: 38px; height: 22px; flex: none; }
+    .sw input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; z-index: 1; }
+    .sw span { position: absolute; inset: 0; background: #cbd5e1; border-radius: 999px; transition: .2s; }
+    .sw span::before { content: ""; position: absolute; height: 18px; width: 18px; left: 2px; top: 2px; background: #fff; border-radius: 50%; transition: .2s; box-shadow: 0 1px 2px rgba(0,0,0,.25); }
+    .sw input:checked + span { background: #2563eb; }
+    .sw input:checked + span::before { transform: translateX(16px); }
+    .floating-nav-item { padding: 6px 7px; }
+    details > summary { list-style: none; }
+    details > summary::-webkit-details-marker { display: none; }
 
     .floating-nav-container {
       position: fixed;
@@ -138,6 +147,9 @@
       <button type="button" class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs" data-view="records">
        <i data-lucide="archive" class="h-4 w-4"></i><span>บันทึกใบงาน</span>
       </button>
+      <button type="button" class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs" data-view="bots">
+       <i data-lucide="bot" class="h-4 w-4"></i><span>บอท & คำสั่ง</span>
+      </button>
       <button type="button" class="nav-item flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left text-xs" data-view="queue"> 
        <i data-lucide="clock" class="h-4 w-4"></i><span>Queue</span> 
       </button> 
@@ -173,6 +185,10 @@
       <button type="button" class="floating-nav-item" data-view="records">
         <i data-lucide="archive" class="h-5 w-5"></i>
         <span>บันทึก</span>
+      </button>
+      <button type="button" class="floating-nav-item" data-view="bots">
+        <i data-lucide="bot" class="h-5 w-5"></i>
+        <span>บอท</span>
       </button>
       <button type="button" class="floating-nav-item" data-view="queue">
         <i data-lucide="clock" class="h-5 w-5"></i>
@@ -393,6 +409,25 @@
        <div id="rec-sent" class="rec-panel hidden"></div>
        <div id="rec-activity" class="rec-panel hidden"></div>
       </article>
+     </section>
+
+     <!-- BOTS VIEW -->
+     <section id="bots" class="view">
+      <div class="mb-6 flex flex-col sm:flex-row sm:items-end justify-between gap-3">
+       <div>
+        <h1 class="m-0 text-xl md:text-2xl font-bold tracking-tight text-[#0F172A]">บอท & คำสั่ง</h1>
+        <p class="mt-1 text-xs md:text-sm font-semibold text-[#64748B]">เปิด/ปิดคำสั่งที่แต่ละบอทและแต่ละกลุ่มใช้ได้ (ใช้ได้เมื่อ "บอทเปิด" และ "กลุ่มเปิด" ทั้งคู่)</p>
+       </div>
+       <button type="button" id="perm-save" class="rounded-lg bg-[#2563EB] px-4 py-2 text-xs font-semibold text-white hover:bg-blue-700">บันทึกการตั้งค่า</button>
+      </div>
+
+      <h2 class="mb-2 mt-0 text-sm font-bold text-[#0F172A]">บอท</h2>
+      <p class="mb-3 mt-0 text-xs text-[#64748B]">กดที่บอทเพื่อดูคำสั่งทั้งหมด แล้วเปิด/ปิดด้วยสวิตช์ คำสั่งที่ปิดไว้ บอทตัวนั้นจะตอบ "คำสั่งนี้ถูกปิดใช้งาน" (ยกเว้นการย่อใบงาน บอทจะไม่ตอบอะไร)</p>
+      <div id="perm-bots" class="space-y-3"><p class="text-xs text-[#94A3B8]">กำลังโหลด...</p></div>
+
+      <h2 class="mb-2 mt-8 text-sm font-bold text-[#0F172A]">กลุ่ม</h2>
+      <p class="mb-3 mt-0 text-xs text-[#64748B]">กลุ่มที่บอทเคยเข้าหรือเคยมีข้อความ กำหนดได้ว่ากลุ่มนี้ใช้คำสั่งไหนได้บ้าง (ปิดที่กลุ่ม = คำสั่งนั้นใช้ไม่ได้ในกลุ่มนี้ แม้บอทจะเปิดอยู่)</p>
+      <div id="perm-groups" class="space-y-3 mb-16"></div>
      </section>
 
      <!-- DETAIL VIEW -->
@@ -733,6 +768,7 @@
       dashboard: "DASHBOARD\nภาพรวมใบงานวันนี้", 
       jobs: "ใบงาน\nใบงานทั้งหมดในระบบ แยกตามวันที่",
       records: "บันทึกใบงาน\nใบเต็ม ใบย่อ คืนงาน ยกเลิกงาน", 
+      bots: "บอท & คำสั่ง\nเปิดปิดคำสั่งต่อบอทและต่อกลุ่ม", 
       detail: "รายละเอียดใบงาน\nข้อมูลเชิงลึกของใบงานที่เลือก", 
       queue: "QUEUE\nใบงานที่กำลังรอประมวลผล", 
       settings: "SETTINGS\nตั้งค่าการทำงานของระบบ", 
@@ -783,10 +819,83 @@
       document.getElementById("custom-modal").classList.remove("hidden");
     }
 
+    // ---------- บอท & คำสั่ง: เปิด/ปิดคำสั่งต่อบอทและต่อกลุ่ม ----------
+    let perm = null;
+
+    function permCard(scope, key, title, subtitle, cmds, botCmds) {
+      const total = perm.commands.length;
+      const on = perm.commands.filter(c => cmds[c.id]).length;
+      const rows = perm.commands.map(c => {
+        const botOff = botCmds && botCmds[c.id] === false;
+        return '<label class="flex items-center justify-between gap-3 border-b border-[#F1F5F9] py-2.5 last:border-0">'
+          + '<div class="min-w-0"><p class="m-0 text-xs font-semibold text-[#0F172A]">' + escapeHtml(c.name)
+          + (botOff ? ' <span class="ml-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-600">บอทปิดอยู่</span>' : '') + '</p>'
+          + '<p class="m-0 mt-0.5 text-[11px] text-[#64748B]">' + escapeHtml(c.desc) + ' • <span class="font-mono">' + escapeHtml(c.example) + '</span></p></div>'
+          + '<span class="sw"><input type="checkbox" class="perm-sw" data-scope="' + scope + '" data-key="' + escapeHtml(key) + '" data-cmd="' + c.id + '"' + (cmds[c.id] ? ' checked' : '') + '><span></span></span></label>';
+      }).join('');
+      return '<details class="page-card p-4 md:p-5">'
+        + '<summary class="flex cursor-pointer items-center justify-between gap-3">'
+        + '<div class="min-w-0"><p class="m-0 text-sm font-bold text-[#0F172A]">' + title + '</p>'
+        + '<p class="m-0 mt-0.5 text-[11px] text-[#64748B]">' + subtitle + '</p></div>'
+        + '<span class="perm-count whitespace-nowrap rounded-full bg-blue-50 px-2.5 py-1 text-[11px] font-semibold text-blue-600">เปิด ' + on + '/' + total + '</span></summary>'
+        + '<div class="mt-3 flex gap-2"><button type="button" data-act="all-on" class="rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">เปิดทั้งหมด</button>'
+        + '<button type="button" data-act="all-off" class="rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">ปิดทั้งหมด</button></div>'
+        + '<div class="mt-2">' + rows + '</div></details>';
+    }
+
+    function renderPermissions() {
+      const botsEl = document.getElementById('perm-bots');
+      const groupsEl = document.getElementById('perm-groups');
+      botsEl.innerHTML = perm.bots.map(b => permCard('bot', b.key,
+        escapeHtml(b.name) + (b.display ? ' <span class="font-normal text-[#64748B]">• ' + escapeHtml(b.display) + (b.basic ? ' ' + escapeHtml(b.basic) : '') + '</span>' : ''),
+        '<span class="status-dot ' + (b.receiving ? 'bg-[#22C55E]' : 'bg-[#F59E0B]') + '"></span> ' + (b.receiving ? 'รับข้อความได้' : 'ยังไม่มี secret (รับข้อความไม่ได้)'),
+        b.commands, null)).join('');
+      groupsEl.innerHTML = perm.groups.length ? perm.groups.map(g => {
+        const bot = perm.bots.find(b => b.key === g.bot);
+        return permCard('group', g.id, escapeHtml(g.name),
+          (g.bot_name ? 'อยู่กับ ' + escapeHtml(g.bot_name) : 'ยังไม่เคยเห็นข้อความ') + (g.name !== g.id ? ' • <span class="font-mono">' + escapeHtml(g.id.slice(0, 12)) + '…</span>' : ''),
+          g.commands, bot ? bot.commands : null);
+      }).join('') : '<p class="rounded-xl border border-dashed border-[#E2E8F0] p-4 text-xs text-[#94A3B8]">ยังไม่มีกลุ่ม: เชิญบอทเข้ากลุ่มแล้วพิมพ์อะไรก็ได้ กลุ่มจะแสดงที่นี่</p>';
+    }
+
+    async function loadPermissions() {
+      try {
+        const res = await fetch('/api/permissions');
+        if (!res.ok) return;
+        perm = await res.json();
+        renderPermissions();
+      } catch (e) {
+        showToast('โหลดการตั้งค่าบอทไม่สำเร็จ');
+      }
+    }
+
+    function updatePermCount(detailsEl) {
+      const boxes = detailsEl.querySelectorAll('.perm-sw');
+      const on = [...boxes].filter(b => b.checked).length;
+      detailsEl.querySelector('.perm-count').textContent = 'เปิด ' + on + '/' + boxes.length;
+    }
+
+    async function savePermissions() {
+      const body = { bot_commands: {}, group_commands: {} };
+      document.querySelectorAll('.perm-sw').forEach(sw => {
+        const target = sw.dataset.scope === 'bot' ? body.bot_commands : body.group_commands;
+        (target[sw.dataset.key] = target[sw.dataset.key] || {})[sw.dataset.cmd] = sw.checked;
+      });
+      try {
+        const res = await fetch('/api/save_permissions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        const data = await res.json();
+        showToast(data.message || (data.success ? 'บันทึกแล้ว' : 'บันทึกไม่สำเร็จ'));
+        if (data.success) loadPermissions();
+      } catch (e) {
+        showToast('บันทึกไม่สำเร็จ: เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+      }
+    }
+
     function showView(view) {
       document.querySelectorAll(".view").forEach(item => item.classList.toggle("active", item.id === view));
       document.querySelectorAll("[data-view]").forEach(item => item.classList.toggle("active", item.dataset.view === view));
       window.scrollTo({ top: 0, behavior: "smooth" });
+      if (view === 'bots') loadPermissions();
     }
 
     function toggleSectionList(containerId, btnEl) {
@@ -1490,6 +1599,18 @@
 
       ['date-filter', 'records-date'].forEach(id => {
         document.getElementById(id).addEventListener('change', e => fetchRecords(e.target.value));
+      });
+      document.getElementById('perm-save').addEventListener('click', savePermissions);
+      ['perm-bots', 'perm-groups'].forEach(id => {
+        const el = document.getElementById(id);
+        el.addEventListener('change', e => { if (e.target.classList.contains('perm-sw')) updatePermCount(e.target.closest('details')); });
+        el.addEventListener('click', e => {
+          const act = e.target.dataset && e.target.dataset.act;
+          if (!act) return;
+          const d = e.target.closest('details');
+          d.querySelectorAll('.perm-sw').forEach(sw => { sw.checked = act === 'all-on'; });
+          updatePermCount(d);
+        });
       });
       document.getElementById('detail-delete').addEventListener('click', () => { if (currentDetailKey) deleteJob(currentDetailKey, true); });
       document.getElementById('status-filter').addEventListener('change', () => { if (records) renderJobsTable(records.full); });
