@@ -1422,6 +1422,9 @@ def add_job_to_queue(text, sender_id=None):
             if prev.get("plate"):
                 job_item["plate"] = prev["plate"]
                 job_item["formatted_summary"] = apply_plate(job_item["formatted_summary"], prev["plate"])
+            if prev.get("price_override") not in (None, ""):
+                job_item["price_override"] = prev["price_override"]
+                job_item["formatted_summary"] = apply_price_value(job_item["formatted_summary"], prev["price_override"])
             if prev.get("price_adj"):
                 job_item["price_adj"] = prev["price_adj"]
                 job_item["formatted_summary"] = apply_price_adj(job_item["formatted_summary"], prev["price_adj"])
@@ -1758,6 +1761,26 @@ def apply_price_adj(summary, adj):
     return first + sep + rest
 
 
+def apply_price_value(summary, value):
+    """ตั้งราคาในใบสรุปเป็นค่าใหม่ (ลบส่วนปรับเดิมออก): /380+50#... -> /200#..."""
+    first, sep, rest = summary.partition("\n")
+    first = re.sub(r'/(\d+)(?:[+-]\d+)?#', lambda m: f"/{value}#", first, count=1)
+    return first + sep + rest
+
+
+def _effective_price(job):
+    """ราคาที่ใช้จริง: ราคาที่ตั้งใหม่ (price_override) ถ้ามี ไม่งั้นราคาที่อ่านจากใบงาน"""
+    return job.get("price_override") if job.get("price_override") not in (None, "") else job.get("price", "")
+
+
+def set_price_override(job, value, sender_id=None):
+    job["price_override"] = value
+    job["price_adj"] = 0
+    job["formatted_summary"] = apply_price_value(job["formatted_summary"], value)
+    mark_job(job, "price", f"ตั้งราคา {value}")
+    _queue_compact_update(job, sender_id)
+
+
 def set_price_adj(job, adj, sender_id=None):
     job["price_adj"] = adj
     job["formatted_summary"] = apply_price_adj(job["formatted_summary"], adj)
@@ -1859,7 +1882,7 @@ def close_job(job_id, date_text, block, sender_id=None):
 
 _PRICE_HEAD_RE = re.compile(r'^\s*(?:แก้ไข|อั[พป]?เด[ทต])ราคา\s*$')
 _PRICE_LINE_RE = re.compile(
-    r'^\s*([A-Za-z]+\d+)\s*(?:(\d{1,2}(?:[/\-.]\d{1,2}(?:[/\-.]\d{2,4})?)?)\s+)?([+-])\s*(\d+)\s*$')
+    r'^\s*([A-Za-z]+\d+)\s*(?:(\d{1,2}(?:[/\-.]\d{1,2}(?:[/\-.]\d{2,4})?)?)\s+)?([+-]?)\s*(\d+)\s*$')
 
 
 def price_command(lines, sender_id=None):
@@ -1873,17 +1896,22 @@ def price_command(lines, sender_id=None):
             results.append(f"⚠️ อ่านไม่ออก: {ln.strip()}")
             continue
         job_id, date_text, sign, num = m.groups()
+        if not sign and not date_text and int(num) < 100:  # "F01 19" น่าจะเป็นวันที่ที่ลืมใส่ราคา ไม่ใช่ราคา 19
+            results.append(f"⚠️ อ่านไม่ออก: {ln.strip()} (ถ้า {num} คือวันที่ ให้ใส่ราคาตามหลัง เช่น {job_id} {num} 200 หรือ {job_id} {num} +50)")
+            continue
         job, err = resolve_job(job_id, date_text)
         if err:
             results.append(f"⚠️ {err}")
             continue
-        adj = int(num) * (1 if sign == "+" else -1)
         with state_lock:
-            set_price_adj(job, adj, sender_id)
+            if sign:   # +50 / -30 : ปรับต่อท้ายราคาเดิม
+                set_price_adj(job, int(num) * (1 if sign == "+" else -1), sender_id)
+            else:      # 200 : ใช้ราคาที่แก้ไข
+                set_price_override(job, int(num), sender_id)
             first = str(job["formatted_summary"]).splitlines()[0]
         results.append(f"✅ {first}")
     persist_state()
-    return "\n".join(results) or "ไม่พบรายการราคา เช่น\nแก้ไขราคา\nF01 +50\nF02 +100"
+    return "\n".join(results) or "ไม่พบรายการราคา เช่น\nแก้ไขราคา\nF01 +50  (เพิ่มจากราคาเดิม)\nF02 200  (ใช้ราคา 200)"
 
 
 _UNCANCEL_RE = re.compile(r'^\s*(?:uncancel|un)\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$', re.IGNORECASE)
@@ -1900,6 +1928,8 @@ def _restore_cancelled(job, sender_id=None):
         plate = job.get("plate")
         if plate:
             summary = apply_plate(summary, plate)
+        if job.get("price_override") not in (None, ""):
+            summary = apply_price_value(summary, job["price_override"])
         if job.get("price_adj"):
             summary = apply_price_adj(summary, job["price_adj"])
         job["formatted_summary"] = summary
@@ -2098,7 +2128,7 @@ def now_text(job_id, date_text):
     if _job_state(job) == "cancelled":
         return f"⚠️ {job.get('id')} ถูกยกเลิกแล้ว"
     adj = job.get("price_adj")
-    price = f"{job.get('price', '')}{adj:+d}" if adj else f"{job.get('price', '')}"
+    price = f"{_effective_price(job)}{adj:+d}" if adj else f"{_effective_price(job)}"
     return f"now  {job.get('car_code', '')}\n\n{job.get('pickup', '-')}-{job.get('dropoff', '-')}\n\n{price}"
 
 
@@ -2167,8 +2197,10 @@ HELP_TEXT = """📖 รายการคำสั่งของบอท
 ━━━━━━━━━━━━━━
 🔟 แก้ไขราคา
 ▶️ บรรทัดแรกพิมพ์  แก้ไขราคา  (หรือ อัพเดทราคา)
-▶️ บรรทัดถัดไป  F01 +50  /  F02 -30
-✅ ราคาในตารางเป็น 380+50 (เก็บถาวร, +0 = ยกเลิกส่วนปรับ, ระบุวันได้ เช่น F01 18 +50)
+▶️ บรรทัดถัดไป  F01 +50  /  F02 -30  (มี + หรือ - = เพิ่ม/ลดจากราคาเดิม)
+▶️ หรือ  F01 200  (ไม่มี + = ใช้ราคา 200 แทน)
+▶️ ระบุวันได้ เช่น  F01 19 +50  /  F01 19 200
+✅ ราคาในตารางเป็น 380+50 หรือ 200 (เก็บถาวร, +0 = ยกเลิกส่วนปรับ)
 
 ━━━━━━━━━━━━━━
 1️⃣1️⃣ ล้างทะเบียน
@@ -2928,7 +2960,7 @@ def _job_export_row(j):
     return [
         _norm_job_date(j.get("date")), j.get("id", ""), j.get("time", ""),
         j.get("pickup", ""), j.get("dropoff", ""), j.get("flight", ""), j.get("order", ""),
-        j.get("car_code", ""), j.get("price", ""), f"{adj:+d}" if adj else "",
+        j.get("car_code", ""), _effective_price(j), f"{adj:+d}" if adj else "",
         j.get("plate", "") or "", j.get("status", ""), _STATE_TH.get(_job_state(j), ""),
         j.get("formatted_summary", ""), j.get("text") or j.get("raw_text") or "",
     ]
