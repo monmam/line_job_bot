@@ -1701,6 +1701,61 @@ def price_command(lines, sender_id=None):
     return "\n".join(results) or "ไม่พบรายการราคา เช่น\nแก้ไขราคา\nF01 +50\nF02 +100"
 
 
+_UNCANCEL_RE = re.compile(r'^\s*uncancel\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$', re.IGNORECASE)
+_UNCANCEL_LINE_RE = re.compile(r'^\W*uncancel\W*$', re.IGNORECASE | re.MULTILINE)
+
+
+def _restore_cancelled(job, sender_id=None):
+    """ดึงงานที่ยกเลิกกลับมา: สร้างใบสรุปจากข้อความต้นฉบับใหม่ แล้วใส่ทะเบียน/ส่วนปรับราคาเดิมกลับ"""
+    with state_lock:
+        raw = job.get("text") or job.get("raw_text") or ""
+        summary = parse_job_text(raw, fallback_id=str(job.get("id", "")))["formatted_summary"] if raw else ""
+        if not summary:
+            return None
+        plate = job.get("plate")
+        if plate:
+            summary = apply_plate(summary, plate)
+        if job.get("price_adj"):
+            summary = apply_price_adj(summary, job["price_adj"])
+        job["formatted_summary"] = summary
+        job["cancelled"] = False
+        job["state"] = "returned" if plate == RETURN_MARK else "normal"
+        mark_job(job, "uncancel", "ดึงงานกลับมา")
+        _queue_compact_update(job, sender_id)
+    persist_state()
+    return summary
+
+
+def uncancel_job(job_id, date_text, sender_id=None):
+    """uncancel F09 / uncancel F09 18 -> ดึงงานที่ยกเลิกกลับมา"""
+    job, err = resolve_job(job_id, date_text)
+    if err:
+        return False, err
+    if _job_state(job) != "cancelled":
+        return False, f"{job.get('id')} ไม่ได้ถูกยกเลิก"
+    summary = _restore_cancelled(job, sender_id)
+    if not summary:
+        return False, f"{job.get('id')} ไม่มีข้อความต้นฉบับให้สร้างใบสรุปใหม่"
+    return True, "✅ ดึงงานกลับมาแล้ว\n\n" + summary
+
+
+def uncancel_ticket(text, sender_id=None):
+    """ใบงาน + บรรทัด uncancel -> หางานจากเลข Order แล้วดึงกลับมา"""
+    ticket = _UNCANCEL_LINE_RE.sub("", text).strip()
+    order = str(parse_job_text(ticket).get("order", "")).strip()
+    with state_lock:
+        job = next((j for j in latest_jobs if order and order != "-"
+                    and str(j.get("order", "")).strip() == order and j.get("status") != "ยกเลิก"), None)
+    if not job:
+        return False, "ไม่พบใบงานเดิม (เลข Order นี้ยังไม่เคยถูกรับ)"
+    if _job_state(job) != "cancelled":
+        return False, f"{job.get('id')} ไม่ได้ถูกยกเลิก"
+    summary = _restore_cancelled(job, sender_id)
+    if not summary:
+        return False, f"{job.get('id')} ไม่มีข้อความต้นฉบับให้สร้างใบสรุปใหม่"
+    return True, "✅ ดึงงานกลับมาแล้ว\n\n" + summary
+
+
 _CLEAR_PLATE_RE = re.compile(r'^\s*(?:ล้าง|ลบ)ทะเบียน\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$')
 
 
@@ -1840,6 +1895,8 @@ HELP_TEXT = """📖 รายการคำสั่งของบอท
 9️⃣ ยกเลิกงาน
 ▶️ วางใบงานเดิม แล้วเพิ่มบรรทัดสุดท้าย  cancel  (หรือ ยกเลิก)
 ✅ ในตารางจะเป็น  F09 ❌CANCEL❌
+▶️ ถ้ายกเลิกผิด พิมพ์  uncancel F09  (หรือ uncancel F09 18 ระบุวัน)
+✅ ดึงงานกลับมา ใบสรุปกลับเป็นปกติ (ทะเบียนและราคาที่ปรับไว้เดิมยังอยู่)
 
 ━━━━━━━━━━━━━━
 🔟 แก้ไขราคา
@@ -2158,6 +2215,17 @@ def _handle_text(event, conf):
                 print(f"⚠️ ตอบกลับไม่ได้: {e}")
         return
 
+    um2 = _UNCANCEL_RE.match(received_text)
+    if um2:
+        ok, result = uncancel_job(um2.group(1), um2.group(2), user_id)
+        print(f"↩️ uncancel {um2.group(1)}" if ok else f"⚠️ uncancel ไม่สำเร็จ: {result}")
+        _reply_long(conf, event.reply_token, result if ok else f"⚠️ {result}")
+        return
+    if _UNCANCEL_LINE_RE.search(received_text) and _is_ticket_text(received_text):
+        ok, result = uncancel_ticket(received_text, user_id)
+        print("↩️ uncancel (ใบงาน)" if ok else f"⚠️ uncancel ไม่สำเร็จ: {result}")
+        _reply_long(conf, event.reply_token, result if ok else f"⚠️ {result}")
+        return
     if is_cancel_ticket(received_text) and (
             "【客户订单号】" in received_text or is_voucher_format(received_text)
             or is_kv_format(received_text) or is_plain_format(received_text)):
