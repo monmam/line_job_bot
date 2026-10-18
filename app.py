@@ -1536,15 +1536,15 @@ def _reply_long(conf, reply_token, text):
         print(f"⚠️ ตอบกลับไม่ได้: {e}")
 
 
-def resolve_job(job_id, date_text=None):
-    """หาใบงานจากรหัส (+วันที่ถ้าระบุ) คืน (job, ข้อความผิดพลาด)
+def _job_candidates(job_id, date_text=None):
+    """ใบงานทุกใบของรหัสนั้น (+วันที่ถ้าระบุ) ในวันที่เลือก (ใหม่สุดก่อน) คืน (รายการ, ข้อความผิดพลาด)
     รหัสซ้ำหลายวันและไม่ระบุวัน: ใช้ของวันนี้ถ้ามี ไม่งั้นให้ระบุวัน"""
     job_id = job_id.strip().upper()
     want = None
     if date_text:
         want = parse_update_date(date_text)
         if want is None:
-            return None, f"อ่านวันที่ '{date_text}' ไม่ได้"
+            return [], f"อ่านวันที่ '{date_text}' ไม่ได้"
     with state_lock:
         seen, cands = set(), []
         for j in latest_jobs:
@@ -1559,14 +1559,22 @@ def resolve_job(job_id, date_text=None):
             seen.add(k)
             cands.append(j)
     if not cands:
-        return None, f"ไม่พบใบงาน {job_id}" + (f" ของวันที่ {want}" if want else "")
+        return [], f"ไม่พบใบงาน {job_id}" + (f" ของวันที่ {want}" if want else "")
     dates = sorted({_norm_job_date(j.get("date")) for j in cands}, key=_date_sort_key)
     if len(dates) > 1:
         today = now_th().strftime("%d/%m/%Y")
         if today not in dates:
-            return None, f"{job_id} มีหลายวัน ({', '.join(dates)}) กรุณาระบุวัน เช่น {job_id} {dates[0][:2]}"
+            return [], f"{job_id} มีหลายวัน ({', '.join(dates)}) กรุณาระบุวัน เช่น {job_id} {dates[0][:2]}"
         dates = [today]
-    return next(j for j in cands if _norm_job_date(j.get("date")) == dates[0]), None
+    return [j for j in cands if _norm_job_date(j.get("date")) == dates[0]], None
+
+
+def resolve_job(job_id, date_text=None):
+    """หาใบงานจากรหัส (+วันที่ถ้าระบุ) คืน (job, ข้อความผิดพลาด) ถ้ามีหลายใบรหัสเดียวกันวันเดียวกัน ใช้ใบใหม่สุด"""
+    cands, err = _job_candidates(job_id, date_text)
+    if err:
+        return None, err
+    return cands[0], None
 
 
 def _queue_compact_update(job, sender_id=None):
@@ -1718,8 +1726,8 @@ def price_command(lines, sender_id=None):
     return "\n".join(results) or "ไม่พบรายการราคา เช่น\nแก้ไขราคา\nF01 +50\nF02 +100"
 
 
-_UNCANCEL_RE = re.compile(r'^\s*uncancel\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$', re.IGNORECASE)
-_UNCANCEL_LINE_RE = re.compile(r'^\W*uncancel\W*$', re.IGNORECASE | re.MULTILINE)
+_UNCANCEL_RE = re.compile(r'^\s*(?:uncancel|un)\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$', re.IGNORECASE)
+_UNCANCEL_LINE_RE = re.compile(r'^\W*(?:uncancel|un)\W*$', re.IGNORECASE | re.MULTILINE)
 
 
 def _restore_cancelled(job, sender_id=None):
@@ -1743,43 +1751,114 @@ def _restore_cancelled(job, sender_id=None):
     return summary
 
 
-def _uncancel_reply(job, summary):
+def _uncancel_reply(job, summary, remaining=0):
     date = _norm_job_date(job.get("date"))
     text_date = _norm_job_date(parse_job_text(job.get("text") or job.get("raw_text") or "").get("date"))
     msg = f"✅ ดึงงานกลับมาแล้ว (วันที่ {date})\n\n{summary}"
+    if str(summary).split("\n")[0].endswith("---"):
+        msg += "\n\n⚠️ ข้อมูลใบงานนี้ไม่ครบ (จุดรับ/จุดส่งว่าง เพราะใบที่ยกเลิกเป็นข้อความสั้น) ส่งใบงานเต็มเข้ามาใหม่เพื่อแก้"
     if text_date and text_date != date and text_date != "-":
         msg += f"\n\n⚠️ ข้อความต้นฉบับของใบงานนี้ระบุวันที่ {text_date} แต่ระบบบันทึกเป็นวันที่ {date} ตรวจสอบด้วย"
+    if remaining:
+        msg += f"\n\nℹ️ ยังมี {job.get('id')} ที่ยกเลิกอยู่อีก {remaining} ใบ พิมพ์ uncancel {job.get('id')} อีกครั้งเพื่อดึงใบถัดไป"
     return msg
 
 
-def uncancel_job(job_id, date_text, sender_id=None):
-    """uncancel F09 / uncancel F09 18 -> ดึงงานที่ยกเลิกกลับมา"""
-    job, err = resolve_job(job_id, date_text)
-    if err:
-        return False, err
-    if _job_state(job) != "cancelled":
-        return False, f"{job.get('id')} ไม่ได้ถูกยกเลิก"
+def _do_uncancel(cancelled, others_active_note, sender_id):
+    job = cancelled[0]
     summary = _restore_cancelled(job, sender_id)
     if not summary:
         return False, f"{job.get('id')} ไม่มีข้อความต้นฉบับให้สร้างใบสรุปใหม่"
-    return True, _uncancel_reply(job, summary)
+    return True, _uncancel_reply(job, summary, remaining=len(cancelled) - 1)
+
+
+def _is_stub_cancel(job):
+    """รายการยกเลิกที่สร้างจากข้อความสั้น (ไม่มีจุดรับ/จุดส่ง) สร้างใบสรุปกลับมาไม่ได้"""
+    raw = job.get("text") or job.get("raw_text") or ""
+    return not raw or str(parse_job_text(raw, fallback_id=str(job.get("id", "")))["formatted_summary"]).split("\n")[0].endswith("---")
+
+
+def uncancel_job(job_id, date_text, sender_id=None):
+    """uncancel F09 / uncancel F09 18 -> ดึงงานที่ยกเลิกกลับมา
+    ถ้ามีหลายใบรหัสเดียวกันวันเดียวกัน (ปกติ + ยกเลิก) เลือกเฉพาะใบที่ยกเลิกอยู่ (ใหม่สุดก่อน)
+    รายการยกเลิกที่เป็นข้อความสั้น (กู้ใบสรุปไม่ได้) และมีใบปกติรหัส/วันเดียวกันอยู่แล้ว จะถูกลบทิ้งแทนการกู้"""
+    cands, err = _job_candidates(job_id, date_text)
+    if err:
+        return False, err
+    cancelled = [j for j in cands if _job_state(j) == "cancelled"]
+    active = [j for j in cands if _job_state(j) != "cancelled"]
+    if not cancelled:
+        return False, f"{cands[0].get('id')} ไม่ได้ถูกยกเลิก"
+    note = ""
+    stubs = [j for j in cancelled if _is_stub_cancel(j)]
+    if stubs and active:
+        with state_lock:
+            for j in stubs:
+                j["status"] = "ยกเลิก"  # ลบออกจากรายการ
+                mark_job(j, "uncancel", "ลบรายการยกเลิกที่เป็นข้อความสั้น (มีใบปกติอยู่แล้ว)")
+            _queue_compact_update(active[0], sender_id)
+        persist_state()
+        cancelled = [j for j in cancelled if j not in stubs]
+        note = (f"🧹 ลบรายการ {active[0].get('id')} ❌CANCEL❌ ที่เป็นข้อความสั้นแล้ว {len(stubs)} รายการ "
+                f"(วันนี้มี {active[0].get('id')} ปกติอยู่แล้ว {len(active)} ใบ)")
+        if not cancelled:
+            return True, note
+    ok, msg = _do_uncancel(cancelled, None, sender_id)
+    return ok, (note + "\n\n" + msg) if note and ok else msg
 
 
 def uncancel_ticket(text, sender_id=None):
-    """ใบงาน + บรรทัด uncancel -> หางานจากเลข Order แล้วดึงกลับมา"""
+    """ใบงานเต็ม + บรรทัด uncancel (หรือ un) -> ทำให้ใบงานนี้กลับมาเป็นงานปกติ ใช้ข้อความใบงานที่แนบมาสร้างใบสรุปใหม่
+    1) มีใบเดิม (Order+วันเดียวกัน) ที่ยกเลิกอยู่ -> ดึงกลับ  2) ไม่เจอตาม Order แต่มีรายการ CANCEL สั้น ๆ ของรหัส/วันเดียวกัน -> เปลี่ยนเป็นใบงานนี้
+    3) ไม่มีเลย -> เพิ่มเป็นใบงานใหม่  รายการ CANCEL สั้น ๆ ที่เหลือของรหัส/วันเดียวกันถูกลบทิ้ง"""
     ticket = _UNCANCEL_LINE_RE.sub("", text).strip()
-    order = str(parse_job_text(ticket).get("order", "")).strip()
+    parsed = parse_job_text(ticket)
+    order = str(parsed.get("order", "")).strip()
+    code = str(parsed.get("id", "")).strip().upper()
+    date = _norm_job_date(parsed.get("date"))
+    notes = []
     with state_lock:
-        job = next((j for j in _find_by_order(latest_jobs, order, parse_job_text(ticket).get("date"))
-                    if j.get("status") != "ยกเลิก"), None)
-    if not job:
-        return False, "ไม่พบใบงานเดิม (เลข Order นี้ยังไม่เคยถูกรับ)"
-    if _job_state(job) != "cancelled":
-        return False, f"{job.get('id')} ไม่ได้ถูกยกเลิก"
-    summary = _restore_cancelled(job, sender_id)
-    if not summary:
-        return False, f"{job.get('id')} ไม่มีข้อความต้นฉบับให้สร้างใบสรุปใหม่"
-    return True, _uncancel_reply(job, summary)
+        found = [j for j in _find_by_order(latest_jobs, order, parsed.get("date")) if j.get("status") != "ยกเลิก"]
+        same_code = [j for j in latest_jobs if j.get("status") != "ยกเลิก"
+                     and str(j.get("id", "")).strip().upper() == code and _norm_job_date(j.get("date")) == date]
+        target = next((j for j in found if _job_state(j) == "cancelled"), None)
+        if target is None and not found:
+            # ไม่เจอตาม Order: ใช้รายการ CANCEL สั้น ๆ ของรหัส/วันเดียวกันที่ใหม่สุด
+            target = next((j for j in same_code if _job_state(j) == "cancelled" and _is_stub_cancel(j)), None)
+        active = [j for j in found if _job_state(j) != "cancelled"]
+        if target is not None:
+            target["text"] = target["raw_text"] = ticket       # ใช้ข้อความเต็มที่แนบมา
+            target["order"] = order if order and order != "-" else target.get("order", "")
+            for k in ("pickup", "dropoff", "flight", "car_code", "price", "time", "date"):
+                if parsed.get(k) not in (None, "", "-"):
+                    target[k] = parsed[k]
+            target["pickup_display"], target["dropoff_display"] = target.get("pickup", ""), target.get("dropoff", "")
+    summary = None
+    if target is not None:
+        summary = _restore_cancelled(target, sender_id)
+    elif not found:
+        ok, result = add_job_to_queue(ticket, sender_id=sender_id)
+        if not ok:
+            return False, str(result)
+        notes.append("➕ ไม่พบใบงานเดิม เพิ่มเป็นใบงานใหม่แล้ว")
+        target, summary = result, result.get("formatted_summary", "")
+    else:
+        notes.append(f"ℹ️ {code} ใบนี้เป็นงานปกติอยู่แล้ว ไม่ได้ถูกยกเลิก")
+        target = found[0]
+    # ลบรายการ CANCEL สั้น ๆ ที่เหลือของรหัส/วันเดียวกัน (ใบปกติของงานนี้มีแล้ว)
+    with state_lock:
+        leftovers = [j for j in same_code if j is not target and _job_state(j) == "cancelled" and _is_stub_cancel(j)]
+        for j in leftovers:
+            j["status"] = "ยกเลิก"
+            mark_job(j, "uncancel", "ลบรายการยกเลิกที่เป็นข้อความสั้น (มีใบเต็มแล้ว)")
+        if leftovers:
+            _queue_compact_update(target, sender_id)
+    if leftovers:
+        persist_state()
+        notes.append(f"🧹 ลบรายการ {code} ❌CANCEL❌ ที่เป็นข้อความสั้นแล้ว {len(leftovers)} รายการ")
+    if summary:
+        return True, "\n\n".join([_uncancel_reply(target, summary)] + notes) if not notes or notes[0][0] != "➕" else "\n\n".join(notes + [summary])
+    return True, "\n\n".join(notes)
 
 
 _CLEAR_PLATE_RE = re.compile(r'^\s*(?:ล้าง|ลบ)ทะเบียน\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$')
@@ -1921,8 +2000,9 @@ HELP_TEXT = """📖 รายการคำสั่งของบอท
 9️⃣ ยกเลิกงาน
 ▶️ วางใบงานเดิม แล้วเพิ่มบรรทัดสุดท้าย  cancel  (หรือ ยกเลิก)
 ✅ ในตารางจะเป็น  F09 ❌CANCEL❌
-▶️ ถ้ายกเลิกผิด พิมพ์  uncancel F09  (หรือ uncancel F09 18 ระบุวัน)
-✅ ดึงงานกลับมา ใบสรุปกลับเป็นปกติ (ทะเบียนและราคาที่ปรับไว้เดิมยังอยู่)
+▶️ ถ้ายกเลิกผิด พิมพ์  uncancel F09  หรือ  un F09  (ระบุวันได้ เช่น un F09 18)
+▶️ หรือวางใบงานเต็ม แล้วเพิ่มบรรทัดสุดท้าย  uncancel  (หรือ  un)  (ใช้เมื่อรหัสซ้ำหลายใบ)
+✅ ดึงงานกลับมา ใบสรุปกลับเป็นปกติ (ทะเบียนและราคาที่ปรับไว้เดิมยังอยู่) รายการ CANCEL สั้น ๆ ที่ค้างจะถูกลบ
 
 ━━━━━━━━━━━━━━
 🔟 แก้ไขราคา
