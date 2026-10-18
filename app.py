@@ -43,6 +43,60 @@ BACKUP_CONFIGURATIONS = [
 ]
 
 
+def bots_status():
+    """สถานะบอททั้งหมด: บอทหลัก + บอทสำรองที่ใส่ใน LINE_BACKUP_TOKENS (รับข้อความได้เมื่อมี secret ตรงลำดับ)"""
+    bots = [{"name": "บอทหลัก", "receiving": bool(LINE_CHANNEL_SECRET)}]
+    for i in range(len(BACKUP_CONFIGURATIONS)):
+        bots.append({"name": f"บอทสำรอง {i + 1}",
+                     "receiving": i < len(_backup_secrets) and bool(_backup_secrets[i])})
+    return bots
+
+
+# ตอบกลับต้องใช้ access token ของ "บอทตัวที่ส่งข้อความมา" ถ้า LINE_BACKUP_TOKENS กับ LINE_BACKUP_SECRETS เรียงลำดับไม่ตรงกัน
+# reply จะล้มด้วย "Invalid reply token" ระบบจึงถาม LINE ว่า token แต่ละตัวเป็นบอทไหน (userId) แล้วจับคู่กับ destination ใน webhook ให้เอง
+_ctx = threading.local()
+_bot_ids = {}                 # userId ของบอท -> (ชื่อ, Configuration)
+_bot_ids_loaded = False
+_bot_ids_lock = threading.Lock()
+_pair_warned = set()
+
+
+def _load_bot_ids():
+    global _bot_ids_loaded
+    with _bot_ids_lock:
+        if _bot_ids_loaded:
+            return
+        _bot_ids_loaded = True
+        names = ["บอทหลัก"] + [f"บอทสำรอง {i + 1}" for i in range(len(BACKUP_CONFIGURATIONS))]
+        for name, conf in zip(names, [configuration] + BACKUP_CONFIGURATIONS):
+            try:
+                r = requests.get("https://api.line.me/v2/bot/info",
+                                 headers={"Authorization": f"Bearer {conf.access_token}"}, timeout=8)
+                if r.status_code == 200 and r.json().get("userId"):
+                    _bot_ids[r.json()["userId"]] = (name, conf)
+                else:
+                    print(f"⚠️ {name}: เช็ค access token ไม่ผ่าน (LINE ตอบ {r.status_code}) ใส่ Channel access token ถูกตัวหรือยัง")
+            except Exception as e:
+                print(f"⚠️ {name}: ตรวจ access token ไม่สำเร็จ: {e}")
+
+
+def _pick_conf(default_conf, default_name):
+    """เลือก token ที่ตรงกับบอทที่ส่ง webhook มาจริง ๆ (ดูจาก destination) ถ้าหาไม่ได้ใช้ตัวเดิม"""
+    dest = getattr(_ctx, "destination", None)
+    if not dest:
+        return default_conf
+    _load_bot_ids()
+    hit = _bot_ids.get(dest)
+    if not hit:
+        return default_conf
+    name, real_conf = hit
+    if real_conf is not default_conf and (default_name, name) not in _pair_warned:
+        _pair_warned.add((default_name, name))
+        print(f"⚠️ {default_name}: Channel secret กับ access token ไม่ใช่บอทตัวเดียวกัน (บอทที่ส่งข้อความมาคือ {name}) "
+              f"ใช้ token ของ {name} ตอบแทนให้แล้ว แต่ควรแก้ลำดับ LINE_BACKUP_SECRETS ให้ตรงกับ LINE_BACKUP_TOKENS")
+    return real_conf
+
+
 def push_with_fallback(to, messages, label):
     """ส่ง push ด้วยบอทหลัก ถ้าไม่ได้ (เช่น โควต้าเต็ม / บอทไม่อยู่ในกลุ่ม) ไล่ใช้บอทสำรองทีละตัว"""
     for idx, conf in enumerate([configuration] + BACKUP_CONFIGURATIONS):
@@ -76,7 +130,7 @@ def _make_backup_handler(secret, conf, name):
     @h.add(MessageEvent, message=TextMessageContent)
     def _on_message(event):
         print(f"🤖 ข้อความเข้าบอท {name}")
-        _handle_text(event, conf)
+        _handle_text(event, _pick_conf(conf, name))
 
     @h.add(JoinEvent)
     def _on_join(event):
@@ -927,7 +981,7 @@ def _parse_kv(raw_text):
     }
 
 
-_WEEKDAY_DATE_RE = re.compile(r'^(?:[A-Za-z]+,\s*)?(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})$')
+_WEEKDAY_DATE_RE = re.compile(r'^(?:Amend\s*>*\s*)?(?:[A-Za-z]+,\s*)?(\d{1,2})\s+([A-Za-z]{3,9})\s+(\d{4})$', re.IGNORECASE)
 _ROUTE_LINE_RE = re.compile(r'^[A-Za-z][A-Za-z ]*\s-\s[A-Za-z][A-Za-z ]*$')  # เช่น BKK - Don Mueang / Pak Kret District - DMK
 _FLIGHT_SPACED_RE = re.compile(r'^([A-Za-z0-9]{2})\s*-\s*(\d{1,4})$')
 
@@ -973,11 +1027,14 @@ def _parse_plain(raw_text):
             flight = re.sub(r'[\s-]+', '', lines[date_idx - 1]).upper()
             flight_idx = date_idx - 1
 
-    # หลังบรรทัดเส้นทาง (BKK - Don Mueang) ถึงบรรทัดเที่ยวบิน: ข้อความที่ไม่ใช่ "-" = [จุดรับ, จุดส่ง]
+    # หลังบรรทัดเส้นทาง (BKK - Don Mueang) ถึงบรรทัดเที่ยวบิน/วันที่ เรียงเป็น
+    # [จุดรับ, หมายเหตุจุดรับ, จุดส่ง, หมายเหตุจุดส่ง, ...] โดย "-" = ไม่มีหมายเหตุ (หมายเหตุเช่น "terminal 2 ต่างประเทศ" ไม่ใช่สถานที่)
     route_idx = next((i for i, ln in enumerate(lines[:flight_idx]) if _ROUTE_LINE_RE.match(ln)), None)
-    places = []
-    if route_idx is not None:
-        places = [ln for ln in lines[route_idx + 1:flight_idx] if ln != "-"]
+    block = lines[route_idx + 1:flight_idx] if route_idx is not None else []
+    if len(block) >= 3:
+        places = [block[0], block[2]]
+    else:  # รูปแบบสั้น: เอาเฉพาะบรรทัดที่ไม่ใช่ "-"
+        places = [ln for ln in block if ln != "-"]
     def _plain_place(text):
         short = _short_name(text)
         if parse_location_rule_based(short) != short.strip():
@@ -986,8 +1043,8 @@ def _parse_plain(raw_text):
             return text
         return short
 
-    pickup_raw = _plain_place(places[0]) if places else "-"
-    dropoff_raw = _plain_place(places[1]) if len(places) > 1 else "-"
+    pickup_raw = _plain_place(places[0]) if places and places[0] != "-" else "-"
+    dropoff_raw = _plain_place(places[1]) if len(places) > 1 and places[1] != "-" else "-"
 
     car_info = match_car(lines[date_idx + 2]) if date_idx + 2 < len(lines) else None
     if not car_info:
@@ -1957,7 +2014,7 @@ def handle_leave(event):
 
 @handler.add(MessageEvent, message=TextMessageContent)
 def handle_message(event):
-    _handle_text(event, configuration)
+    _handle_text(event, _pick_conf(configuration, "บอทหลัก"))
 
 
 def _handle_text(event, conf):
@@ -2231,6 +2288,7 @@ def api_system_health():
         "google_sheets": bool(GOOGLE_SPREADSHEET_ID) and _sheets_health_cache["ok"],
         "storage": storage_ok,
         "storage_message": storage_msg,
+        "bots": bots_status(),
     })
 
 
@@ -2242,6 +2300,10 @@ def callback():
     signature = request.headers.get('X-Line-Signature', '')
     body = request.get_data(as_text=True)
     print("📨 ได้รับ webhook จาก LINE")
+    try:
+        _ctx.destination = json.loads(body).get("destination")
+    except Exception:
+        _ctx.destination = None
 
     try:
         handler.handle(body, signature)
@@ -2255,7 +2317,8 @@ def callback():
             return 'OK'
         except InvalidSignatureError:
             continue
-    print("❌ ลายเซ็น LINE ไม่ถูกต้อง: เช็ค LINE_CHANNEL_SECRET (และ LINE_BACKUP_SECRETS) ใน Render ให้ตรงกับ Channel ที่ตั้ง Webhook")
+    print(f"❌ ลายเซ็น LINE ไม่ถูกต้อง: ลองแล้ว {1 + len(BACKUP_HANDLERS)} บอท (บอทหลัก + บอทสำรองที่มี secret {len(BACKUP_HANDLERS)} ตัว) "
+          "ไม่มี secret ตัวไหนตรงกับบอทที่ส่งมา เช็ค LINE_BACKUP_SECRETS ว่าใส่ Channel secret ของบอทนี้ ไม่ใช่ access token และเรียงลำดับตรงกับ LINE_BACKUP_TOKENS")
     abort(400)
 
 
@@ -2531,7 +2594,10 @@ def _start_background():
         url = base.rstrip("/") + "/health"
         threading.Thread(target=_keep_alive_loop, args=(url,), daemon=True).start()
         print(f"🔔 เปิด keep-alive ping ไปที่ {url} ทุก 10 นาที")
-    print(f"🤖 บอทสำรองสำหรับส่งข้อความ: {len(BACKUP_CONFIGURATIONS)} ตัว")
+    for b in bots_status():
+        print(f"🤖 {b['name']}: {'รับข้อความได้ (webhook + secret พร้อม)' if b['receiving'] else 'ยังไม่มี secret ใน LINE_BACKUP_SECRETS (ส่งได้อย่างเดียว ยังรับข้อความไม่ได้)'}")
+    if len(_backup_secrets) > len(BACKUP_CONFIGURATIONS):
+        print("⚠️ LINE_BACKUP_SECRETS มีมากกว่า LINE_BACKUP_TOKENS เช็คลำดับให้ตรงกัน")
     print(f"💾 ที่เก็บข้อมูล: {'Supabase' if storage.using_supabase() else 'ไฟล์ในเครื่อง (local_store.json)'}")
 
 
