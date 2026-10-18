@@ -1656,7 +1656,7 @@ def cut_table_text(date_text):
 
 
 def now_text(job_id, date_text):
-    """งานด่วน: 'นาววววว ขนาดรถ' / 'จุดรับ-จุดส่ง' / 'ราคา(+ส่วนปรับ)' คั่นด้วยบรรทัดว่าง"""
+    """งานด่วน: 'now ขนาดรถ' / 'จุดรับ-จุดส่ง' / 'ราคา(+ส่วนปรับ)' คั่นด้วยบรรทัดว่าง"""
     job, err = resolve_job(job_id, date_text)
     if err:
         return f"⚠️ {err}"
@@ -1664,7 +1664,7 @@ def now_text(job_id, date_text):
         return f"⚠️ {job.get('id')} ถูกยกเลิกแล้ว"
     adj = job.get("price_adj")
     price = f"{job.get('price', '')}{adj:+d}" if adj else f"{job.get('price', '')}"
-    return f"นาววววว  {job.get('car_code', '')}\n\n{job.get('pickup', '-')}-{job.get('dropoff', '-')}\n\n{price}"
+    return f"now  {job.get('car_code', '')}\n\n{job.get('pickup', '-')}-{job.get('dropoff', '-')}\n\n{price}"
 
 
 _HELP_RE = re.compile(r'^\s*(?:/?help|\?|คำสั่ง(?:ทั้งหมด)?|เมนู|วิธีใช้|ช่วยเหลือ)\s*$', re.IGNORECASE)
@@ -1700,7 +1700,7 @@ HELP_TEXT = """📖 รายการคำสั่งของบอท
 5️⃣ งานด่วน NOW
 ▶️ now F01
 ▶️ นาว f01
-✅ ได้ข้อความงานด่วน 3 บรรทัด: นาววววว ขนาดรถ / จุดรับ-จุดส่ง / ราคา
+✅ ได้ข้อความงานด่วน 3 บรรทัด: now ขนาดรถ / จุดรับ-จุดส่ง / ราคา
 
 ━━━━━━━━━━━━━━
 6️⃣ ปิดใบงาน
