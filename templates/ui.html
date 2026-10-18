@@ -511,6 +511,10 @@
           </span>
          </div>
          <div class="flex justify-between border-b border-[#F1F5F9] pb-3">
+          <span class="text-[#64748B]">บอท LINE ทั้งหมด</span>
+          <span id="status-bots" class="text-right text-[#94A3B8] font-medium">กำลังตรวจสอบ...</span>
+         </div>
+         <div class="flex justify-between border-b border-[#F1F5F9] pb-3">
           <span class="text-[#64748B]">ฐานข้อมูล (Supabase)</span>
           <span id="status-storage" class="flex items-center gap-1.5 text-[#94A3B8] font-medium">
            <span class="status-dot bg-[#94A3B8]"></span>กำลังตรวจสอบ...
@@ -667,7 +671,7 @@
     let localJobs = {};
     let records = null;        // ข้อมูลล่าสุดจาก /api/records
     let recordsDate = "";      // วันที่ที่เลือกดู ("" = วันนี้)
-    const EVENT_LABELS = { new: "🆕 รับใบงานใหม่", amend: "✏️ แก้ไขใบงาน", duplicate: "♻️ ส่งซ้ำ (ไม่รับ)", plate: "🚗 ใส่ป้ายทะเบียน", return: "📌 คืนงาน", cancel: "❌ ยกเลิกงาน", price: "💰 แก้ไขราคา" };
+    const EVENT_LABELS = { new: "🆕 รับใบงานใหม่", amend: "✏️ แก้ไขใบงาน", duplicate: "♻️ ส่งซ้ำ (ไม่รับ)", plate: "🚗 ใส่ป้ายทะเบียน", return: "📌 คืนงาน", cancel: "❌ ยกเลิกงาน", price: "💰 แก้ไขราคา", uncancel: "↩️ ดึงงานกลับมา" };
 
     // คีย์ใบงาน = วันที่|รหัส|Order (รหัสเดียวกันต่างวันไม่ปนกัน)
     function jobKey(job) {
@@ -831,6 +835,12 @@
         } else {
           sheetsEl.className = "flex items-center gap-1.5 text-red-500 font-medium";
           sheetsEl.innerHTML = '<span class="status-dot bg-red-500"></span>Disconnected';
+        }
+
+        const botsEl = document.getElementById('status-bots');
+        if (botsEl && data.bots) {
+          botsEl.className = "text-right text-[#334155] font-medium";
+          botsEl.innerHTML = data.bots.map(b => '<div><span class="status-dot ' + (b.receiving ? 'bg-[#22C55E]' : 'bg-[#F59E0B]') + '"></span> ' + escapeHtml(b.name) + (b.receiving ? '' : ' <span class="text-[#D97706]">(ยังไม่มี secret)</span>') + '</div>').join('');
         }
 
         const storageEl = document.getElementById('status-storage');
