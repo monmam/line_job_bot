@@ -1325,7 +1325,8 @@ def update_plate(text, plate, sender_id=None):
             result["formatted_summary"] = apply_plate(result["formatted_summary"], plate)
             mark_job(result, "return" if plate == RETURN_MARK else "plate", f"{plate} (CAR NO + ใบงาน ไม่พบใบงานเดิม จาก …{str(sender_id or '-')[-6:]})")
         persist_state()
-        return True, result
+        return True, {"id": result["id"], "plate": plate, "new": True,
+                      "formatted_summary": result.get("formatted_summary", "")}
 
     persist_state()
     return True, {"id": job_id, "plate": plate}
@@ -1599,6 +1600,55 @@ def set_plate_manual(job, plate, detail, sender_id=None):
 _CLOSE_RE = re.compile(r'^\s*(?:ปิด)?ใบงาน\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$')
 
 
+_DRIVER_KEY_RE = re.compile(r'^\s*(?:NAME|CAR\s*NO\.?|TEL|APP|TYPE\s*CAR)\s*[:：]', re.IGNORECASE)
+
+
+def split_driver_block(text):
+    """แยกข้อมูลคนขับ (NAME / CAR NO / TEL / APP / TYPE CAR) ที่ต้นหรือท้ายข้อความ ออกจากใบงาน
+    คืน (บล็อกคนขับ, ใบงาน) ถ้าไม่เจอบล็อกคนขับคืน ("", ข้อความเดิม)"""
+    lines = text.strip().splitlines()
+    i = 0
+    while i < len(lines) and (not lines[i].strip() or _DRIVER_KEY_RE.match(lines[i])):
+        i += 1
+    if any(_DRIVER_KEY_RE.match(ln) for ln in lines[:i]):
+        return "\n".join(lines[:i]).strip(), "\n".join(lines[i:]).strip()
+    j = len(lines)
+    while j > 0 and (not lines[j - 1].strip() or _DRIVER_KEY_RE.match(lines[j - 1])):
+        j -= 1
+    if any(_DRIVER_KEY_RE.match(ln) for ln in lines[j:]):
+        return "\n".join(lines[j:]).strip(), "\n".join(lines[:j]).strip()
+    return "", text.strip()
+
+
+def merge_close_text(job_code, driver_block, ticket):
+    """รวมข้อความปิดใบงาน: รหัส F... ข้อมูลคนขับ (ทะเบียน) ไว้บน ใบงานแบบอื่นไว้ล่าง"""
+    if re.match(r'^F\d', str(job_code or "").strip().upper()):
+        return driver_block.strip() + "\n\n" + ticket.strip()
+    return ticket.strip() + "\n\n" + driver_block.strip()
+
+
+def _is_ticket_text(text):
+    return ("【客户订单号】" in text or is_voucher_format(text) or is_kv_format(text) or is_plain_format(text))
+
+
+def close_with_ticket(text, sender_id=None):
+    """ปิดใบงานด้วยข้อความเดียว: ใบงาน + ข้อมูลคนขับ (ต้นหรือท้าย) -> ใส่ทะเบียนตามเลข Order แล้วตอบข้อความรวม
+    คืน (สำเร็จไหม, ข้อความตอบ)"""
+    block, ticket = split_driver_block(text)
+    plate = extract_plate(block)
+    if not block or not plate:
+        return False, "ไม่พบข้อมูลคนขับ (บรรทัด CAR NO : ...) ที่ต้นหรือท้ายข้อความ"
+    if not _is_ticket_text(ticket):
+        return False, "ไม่พบใบงานในข้อความ แนบใบงานทั้งใบ หรือพิมพ์ ใบงาน F01 ไว้บรรทัดแรก"
+    ok, result = update_plate(ticket, plate, sender_id=sender_id)
+    if not ok:
+        return False, str(result)
+    reply = merge_close_text(result.get("id"), block, ticket)
+    if result.get("new"):
+        reply += "\n\n➕ ไม่พบใบงานเดิม เพิ่มเป็นใบงานใหม่แล้ว"
+    return True, reply
+
+
 def close_job(job_id, date_text, block, sender_id=None):
     """ปิดใบงาน: ข้อมูลคนขับ (มี CAR NO) -> ใส่ทะเบียนในใบงาน และคืน 'ข้อมูลคนขับ + ใบงานต้นฉบับ'"""
     plate = extract_plate(block)
@@ -1611,7 +1661,7 @@ def close_job(job_id, date_text, block, sender_id=None):
         set_plate_manual(job, plate, "ปิดใบงาน", sender_id)
         original = job.get("text") or job.get("raw_text") or job.get("formatted_summary", "")
     persist_state()
-    return True, block.strip() + "\n\n" + str(original).strip()
+    return True, merge_close_text(job.get("id"), block, str(original))
 
 
 _PRICE_HEAD_RE = re.compile(r'^\s*(?:แก้ไข|อั[พป]?เด[ทต])ราคา\s*$')
@@ -1760,53 +1810,48 @@ HELP_TEXT = """📖 รายการคำสั่งของบอท
 ✅ ได้ข้อความงานด่วน 3 บรรทัด: now ขนาดรถ / จุดรับ-จุดส่ง / ราคา
 
 ━━━━━━━━━━━━━━
-6️⃣ ปิดใบงาน
-▶️ บรรทัดแรกพิมพ์  ใบงาน F01
-▶️ บรรทัดถัดไปวางข้อมูลคนขับ (NAME / CAR NO / TEL / APP / TYPE CAR)
-✅ ใส่ทะเบียน แล้วบอทตอบข้อมูลคนขับ + ใบงานต้นฉบับรวมกัน
+6️⃣ ปิดใบงาน (ใส่ทะเบียน)
+▶️ วิธีที่ 1: ส่งข้อมูลคนขับ (NAME / CAR NO / TEL / APP / TYPE CAR) พร้อมใบงานทั้งใบ จะวางคนขับไว้บนหรือล่างก็ได้
+▶️ วิธีที่ 2: บรรทัดแรกพิมพ์  ใบงาน F01  แล้วบรรทัดถัดไปวางข้อมูลคนขับ (บอทดึงใบงานเดิมมาเอง)
+✅ ใส่ทะเบียนแล้วบอทตอบข้อความรวม ใบงานรหัส F: ข้อมูลคนขับไว้บน ใบงานแล้ว / ใบงานรหัสอื่น (VK, TT ...): ไว้ล่าง
 
 ━━━━━━━━━━━━━━
-7️⃣ ใส่ทะเบียนตามใบงานเดิม
-▶️ ข้อความ CAR NO : ... แล้วตามด้วยใบงานเดิม
-✅ บอทหาใบงานจากเลข Order แล้วใส่ทะเบียนให้
-
-━━━━━━━━━━━━━━
-8️⃣ คืนงาน (ป้าย 📌)
+7️⃣ คืนงาน (ป้าย 📌)
 ▶️ F22 คืน 16
 ▶️ F22 คืน 16/10
 ✅ เปลี่ยนป้ายงาน F22 ของวันที่ 16 เป็น 📌
 (รหัสซ้ำหลายวันแล้วไม่ใส่วัน บอทจะถามวัน)
 
 ━━━━━━━━━━━━━━
-9️⃣ คืนงานด้วยใบงานเต็ม
+8️⃣ คืนงานด้วยใบงานเต็ม
 ▶️ บรรทัดแรกพิมพ์  📌คืน
 ▶️ บรรทัดถัดไปวางใบงานเดิมทั้งใบ
 ✅ บอทหาจากเลข Order แล้วเปลี่ยนเป็น 📌
 
 ━━━━━━━━━━━━━━
-🔟 ยกเลิกงาน
+9️⃣ ยกเลิกงาน
 ▶️ วางใบงานเดิม แล้วเพิ่มบรรทัดสุดท้าย  cancel  (หรือ ยกเลิก)
 ✅ ในตารางจะเป็น  F09 ❌CANCEL❌
 
 ━━━━━━━━━━━━━━
-1️⃣1️⃣ แก้ไขราคา
+🔟 แก้ไขราคา
 ▶️ บรรทัดแรกพิมพ์  แก้ไขราคา  (หรือ อัพเดทราคา)
 ▶️ บรรทัดถัดไป  F01 +50  /  F02 -30
 ✅ ราคาในตารางเป็น 380+50 (เก็บถาวร, +0 = ยกเลิกส่วนปรับ, ระบุวันได้ เช่น F01 18 +50)
 
 ━━━━━━━━━━━━━━
-1️⃣2️⃣ ล้างทะเบียน
+1️⃣1️⃣ ล้างทะเบียน
 ▶️ ล้างทะเบียน VK05
 ▶️ ล้างทะเบียน VK05 18
 ✅ เอาทะเบียน (หรือ 📌) ออก กลับเป็น 🥶 / 🔥
 
 ━━━━━━━━━━━━━━
-1️⃣3️⃣ ขอ Group ID
+1️⃣2️⃣ ขอ Group ID
 ▶️ id  (พิมพ์ในกลุ่ม)
 ✅ บอทตอบรหัสกลุ่ม
 
 ━━━━━━━━━━━━━━
-1️⃣4️⃣ ดูคำสั่งทั้งหมด
+1️⃣3️⃣ ดูคำสั่งทั้งหมด
 ▶️ help  /  คำสั่ง  /  เมนู
 ✅ แสดงรายการนี้
 
@@ -2133,11 +2178,10 @@ def _handle_text(event, conf):
         print(f"🔒 ปิดใบงาน {cl.group(1)}" if ok else f"⚠️ ปิดใบงานไม่สำเร็จ: {result}")
         _reply_long(conf, event.reply_token, result if ok else f"⚠️ {result}")
         return
-    plate = extract_plate(received_text)
-    if plate:
-        ok, _ = update_plate(received_text, plate, sender_id=user_id)
-        if ok:
-            _remember_reply(event.reply_token, chat_id, conf)
+    if extract_plate(received_text):
+        ok, result = close_with_ticket(received_text, sender_id=user_id)
+        print("🔒 ปิดใบงาน (ใบงาน + ข้อมูลคนขับ)" if ok else f"⚠️ ปิดใบงานไม่สำเร็จ: {result}")
+        _reply_long(conf, event.reply_token, result if ok else f"⚠️ {result}")
         return
 
     if ("【客户订单号】" not in received_text and not is_voucher_format(received_text)
