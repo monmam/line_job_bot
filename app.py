@@ -56,6 +56,7 @@ def bots_status():
 # reply จะล้มด้วย "Invalid reply token" ระบบจึงถาม LINE ว่า token แต่ละตัวเป็นบอทไหน (userId) แล้วจับคู่กับ destination ใน webhook ให้เอง
 _ctx = threading.local()
 _bot_ids = {}                 # userId ของบอท -> (ชื่อ, Configuration)
+_bot_meta = {}                # key บอท (main / backup1 ...) -> {display, basic}
 _bot_ids_loaded = False
 _bot_ids_lock = threading.Lock()
 _pair_warned = set()
@@ -68,12 +69,14 @@ def _load_bot_ids():
             return
         _bot_ids_loaded = True
         names = ["บอทหลัก"] + [f"บอทสำรอง {i + 1}" for i in range(len(BACKUP_CONFIGURATIONS))]
-        for name, conf in zip(names, [configuration] + BACKUP_CONFIGURATIONS):
+        keys = ["main"] + [f"backup{i + 1}" for i in range(len(BACKUP_CONFIGURATIONS))]
+        for key, name, conf in zip(keys, names, [configuration] + BACKUP_CONFIGURATIONS):
             try:
                 r = requests.get("https://api.line.me/v2/bot/info",
                                  headers={"Authorization": f"Bearer {conf.access_token}"}, timeout=8)
                 if r.status_code == 200 and r.json().get("userId"):
                     _bot_ids[r.json()["userId"]] = (name, conf)
+                    _bot_meta[key] = {"display": r.json().get("displayName", ""), "basic": r.json().get("basicId", "")}
                 else:
                     print(f"⚠️ {name}: เช็ค access token ไม่ผ่าน (LINE ตอบ {r.status_code}) ใส่ Channel access token ถูกตัวหรือยัง")
             except Exception as e:
@@ -95,6 +98,134 @@ def _pick_conf(default_conf, default_name):
         print(f"⚠️ {default_name}: Channel secret กับ access token ไม่ใช่บอทตัวเดียวกัน (บอทที่ส่งข้อความมาคือ {name}) "
               f"ใช้ token ของ {name} ตอบแทนให้แล้ว แต่ควรแก้ลำดับ LINE_BACKUP_SECRETS ให้ตรงกับ LINE_BACKUP_TOKENS")
     return real_conf
+
+
+# ====================== สิทธิ์คำสั่ง: เปิด/ปิดได้ต่อบอท และต่อกลุ่ม (ตั้งค่าในหน้าเว็บ "บอท & คำสั่ง") ======================
+# ใช้ได้ต่อเมื่อ "บอทเปิด" และ "กลุ่มเปิด" ทั้งคู่ (ไม่ได้ตั้งค่าไว้ = เปิดทั้งหมด)
+COMMANDS = [
+    {"id": "ticket", "name": "ย่อใบงาน", "desc": "โยนใบงานเต็มเข้ามา บอทอ่านแล้วย่อตอบกลับ", "example": "(วางใบงานเต็ม)"},
+    {"id": "update", "name": "ดูตารางสรุป (Update)", "desc": "ตารางสรุปย่อของวันที่เลือก", "example": "Update 18"},
+    {"id": "full_table", "name": "ดูตารางเต็ม", "desc": "ใบสรุปเต็มทุกงานของวัน (ไอคอนก่อนใส่ทะเบียน)", "example": "ดูตารางเต็ม 18"},
+    {"id": "view_job", "name": "ดูงานเดียว", "desc": "ใบสรุปเต็มของงานเดียว", "example": "ดูงาน F01-18"},
+    {"id": "cut_table", "name": "ตัดตาราง", "desc": "ใบสรุปเต็มเฉพาะงานที่ยังไม่มีทะเบียน", "example": "ตัดตาราง 18"},
+    {"id": "now", "name": "งานด่วน NOW", "desc": "ข้อความงานด่วน: ขนาดรถ / เส้นทาง / ราคา", "example": "now F01"},
+    {"id": "close_job", "name": "ปิดใบงาน (ใส่ทะเบียน)", "desc": "ข้อมูลคนขับ + ใบงาน ใส่ทะเบียนแล้วตอบข้อความรวม", "example": "CAR NO : ... + ใบงาน"},
+    {"id": "return", "name": "คืนงาน (📌)", "desc": "เปลี่ยนป้ายงานเป็น 📌", "example": "F22 คืน 16"},
+    {"id": "cancel", "name": "ยกเลิกงาน", "desc": "ใบงาน + บรรทัด cancel", "example": "ใบงาน + cancel"},
+    {"id": "uncancel", "name": "ดึงงานที่ยกเลิกกลับ", "desc": "ยกเลิกการยกเลิก", "example": "uncancel F09 / un F09"},
+    {"id": "price", "name": "แก้ไขราคา", "desc": "ปรับราคาต่อท้ายในตาราง", "example": "แก้ไขราคา / F01 +50"},
+    {"id": "clear_plate", "name": "ล้างทะเบียน", "desc": "เอาทะเบียนหรือ 📌 ออก", "example": "ล้างทะเบียน VK05"},
+    {"id": "group_id", "name": "ขอ Group ID", "desc": "บอทตอบรหัสกลุ่ม (พิมพ์ในกลุ่ม)", "example": "id"},
+    {"id": "help", "name": "เมนูคำสั่ง", "desc": "แสดงรายการคำสั่งทั้งหมด", "example": "help"},
+]
+COMMAND_IDS = [c["id"] for c in COMMANDS]
+_seen_groups = {}          # group_id -> {"bot": key, "name": ชื่อกลุ่ม, "last": เวลา}
+_seen_lock = threading.Lock()
+
+
+def _bot_list():
+    """[(key, ชื่อ, Configuration)] บอทหลัก + บอทสำรอง"""
+    return [("main", "บอทหลัก", configuration)] + [
+        (f"backup{i + 1}", f"บอทสำรอง {i + 1}", conf) for i, conf in enumerate(BACKUP_CONFIGURATIONS)]
+
+
+def _bot_key_of(conf):
+    for key, _, c in _bot_list():
+        if c is conf:
+            return key
+    return "main"
+
+
+def _cmd_allowed(cmd, bot_key, group_id=None):
+    st = load_settings()
+    if (st.get("bot_commands", {}).get(bot_key, {}) or {}).get(cmd, True) is False:
+        return False
+    if group_id and (st.get("group_commands", {}).get(group_id, {}) or {}).get(cmd, True) is False:
+        return False
+    return True
+
+
+def _record_group(group_id, bot_key):
+    """จำกลุ่มที่บอทอยู่ (ไว้แสดงในหน้าตั้งค่าสิทธิ์) เก็บใน Supabase"""
+    if not group_id:
+        return
+    with _seen_lock:
+        entry = _seen_groups.setdefault(group_id, {})
+        changed = entry.get("bot") != bot_key
+        entry["bot"] = bot_key
+        entry["last"] = _ts()
+        snapshot = json.loads(json.dumps(_seen_groups)) if changed else None
+    if snapshot is not None:
+        try:
+            storage.set("seen_groups", snapshot)
+        except Exception as e:
+            print(f"⚠️ บันทึกรายชื่อกลุ่มไม่สำเร็จ: {e}")
+
+
+def _fetch_group_name(group_id, conf):
+    if not str(group_id).startswith("C"):
+        return ""
+    try:
+        r = requests.get(f"https://api.line.me/v2/bot/group/{group_id}/summary",
+                         headers={"Authorization": f"Bearer {conf.access_token}"}, timeout=6)
+        if r.status_code == 200:
+            return r.json().get("groupName", "")
+    except Exception:
+        pass
+    return ""
+
+
+def _normalize_cmds(d):
+    """เก็บเฉพาะคำสั่งที่ปิด (False) และเป็นรหัสคำสั่งที่มีจริง"""
+    return {c: False for c in COMMAND_IDS if isinstance(d, dict) and d.get(c) is False}
+
+
+@app.route("/api/permissions", methods=["GET"])
+def api_permissions():
+    _load_bot_ids()
+    st = load_settings()
+    bc, gc = st.get("bot_commands", {}), st.get("group_commands", {})
+    full = lambda disabled: {c: (disabled or {}).get(c, True) is not False for c in COMMAND_IDS}
+    names = {}
+    bots = []
+    for key, name, conf in _bot_list():
+        meta = _bot_meta.get(key, {})
+        names[key] = name
+        bots.append({"key": key, "name": name, "display": meta.get("display", ""), "basic": meta.get("basic", ""),
+                     "receiving": any(b["name"] == name and b["receiving"] for b in bots_status()),
+                     "commands": full(bc.get(key))})
+    listed = {str(g.get("group_id", "")).strip(): g.get("name", "") for g in st.get("line_groups", []) if g.get("group_id")}
+    with _seen_lock:
+        seen = json.loads(json.dumps(_seen_groups))
+    ids = list(dict.fromkeys(list(seen) + list(listed) + list(gc)))
+    fetched, groups = 0, []
+    conf_of = {k: c for k, _, c in _bot_list()}
+    for gid in ids:
+        info = seen.get(gid, {})
+        name = listed.get(gid) or info.get("name") or ""
+        if not name and fetched < 8 and info.get("bot") in conf_of:
+            fetched += 1
+            name = _fetch_group_name(gid, conf_of[info["bot"]])
+            if name:
+                with _seen_lock:
+                    _seen_groups.setdefault(gid, {})["name"] = name
+                try:
+                    storage.set("seen_groups", json.loads(json.dumps(_seen_groups)))
+                except Exception:
+                    pass
+        groups.append({"id": gid, "name": name or gid, "bot": info.get("bot", ""), "bot_name": names.get(info.get("bot", ""), ""),
+                       "last": info.get("last", ""), "commands": full(gc.get(gid))})
+    return jsonify({"commands": COMMANDS, "bots": bots, "groups": groups})
+
+
+@app.route("/api/save_permissions", methods=["POST"])
+def api_save_permissions():
+    data = request.get_json(silent=True) or {}
+    bot_commands = {k: _normalize_cmds(v) for k, v in (data.get("bot_commands") or {}).items()}
+    group_commands = {k: _normalize_cmds(v) for k, v in (data.get("group_commands") or {}).items()}
+    ok, msg = save_settings({"bot_commands": {k: v for k, v in bot_commands.items() if v},
+                             "group_commands": {k: v for k, v in group_commands.items() if v}})
+    return jsonify({"success": ok, "message": "บันทึกสิทธิ์คำสั่งเรียบร้อยแล้ว" if ok else msg}), (200 if ok else 500)
 
 
 def push_with_fallback(to, messages, label):
@@ -135,7 +266,9 @@ def _make_backup_handler(secret, conf, name):
     @h.add(JoinEvent)
     def _on_join(event):
         src = event.source
-        print(f"➕ {name} ถูกเชิญเข้า {src.type}: {getattr(src, 'group_id', None) or getattr(src, 'room_id', None)}")
+        gid = getattr(src, 'group_id', None) or getattr(src, 'room_id', None)
+        print(f"➕ {name} ถูกเชิญเข้า {src.type}: {gid}")
+        _record_group(gid, _bot_key_of(conf))
 
     @h.add(LeaveEvent)
     def _on_leave(event):
@@ -341,6 +474,8 @@ def _with_defaults(data):
             grp.setdefault("send", True)   # ส่งใบสรุปเข้ากลุ่ม
             grp.setdefault("read", True)   # อ่านใบงานที่โพสต์ในกลุ่ม (ปิด = บอทไม่อ่านงานในกลุ่มนั้น)
     data.setdefault("custom_keywords", [])
+    data.setdefault("bot_commands", {})     # key บอท -> {คำสั่ง: False} (เก็บเฉพาะที่ปิด)
+    data.setdefault("group_commands", {})   # group_id -> {คำสั่ง: False}
     data.setdefault("main_roads_dict", copy.deepcopy(DEFAULT_MAIN_ROADS_DICT))
     data.setdefault("major_areas_dict", copy.deepcopy(DEFAULT_MAJOR_AREAS_DICT))
     data.setdefault("custom_locations", {"metropole": "เพชรบุรีตัดใหม่", "c u inn": "จตุจักร"})
@@ -395,7 +530,7 @@ def save_settings(data):
                 pass
 
         for key in ("line_groups", "custom_keywords", "main_roads_dict",
-                    "major_areas_dict", "custom_locations"):
+                    "major_areas_dict", "custom_locations", "bot_commands", "group_commands"):
             if key in data:
                 current[key] = data[key]
 
@@ -2244,6 +2379,7 @@ def handle_join(event):
     src = event.source
     cid = getattr(src, 'group_id', None) or getattr(src, 'room_id', None)
     print(f"➕ บอทถูกเชิญเข้า {src.type}: {cid}")
+    _record_group(cid, "main")
 
 
 @handler.add(LeaveEvent)
@@ -2266,7 +2402,22 @@ def _handle_text(event, conf):
     first_line = received_text.splitlines()[0][:40] if received_text else ""
     print(f"📩 ได้รับข้อความจาก {source_type}: {first_line!r}")
 
+    bot_key = _bot_key_of(conf)
+    ctx_group = getattr(event.source, 'group_id', None) or getattr(event.source, 'room_id', None)
+    _record_group(ctx_group, bot_key)
+
+    def allow(cmd, notify=True):
+        """เช็คสิทธิ์คำสั่ง (บอท + กลุ่ม) ที่ตั้งไว้ในหน้าเว็บ ถ้าปิดไว้ตอบแจ้งสั้น ๆ (ยกเว้น notify=False)"""
+        if _cmd_allowed(cmd, bot_key, ctx_group):
+            return True
+        print(f"⛔ ปิดคำสั่ง {cmd} ({bot_key}{', กลุ่ม ' + str(ctx_group) if ctx_group else ''})")
+        if notify:
+            _reply_text(conf, event.reply_token, "⛔ คำสั่งนี้ถูกปิดใช้งานสำหรับบอท/กลุ่มนี้")
+        return False
+
     if source_type == 'group' and received_text.lower() == "id":
+        if not allow("group_id"):
+            return
         print(f"🆔 ตอบ ID ของกลุ่ม: {event.source.group_id}")
         _reply_text(conf, event.reply_token, f"{event.source.group_id}")
         return
@@ -2274,6 +2425,8 @@ def _handle_text(event, conf):
     # "Update 17/10" -> ตอบเฉพาะตารางสรุปย่อของวันนั้น (ใช้ reply ไม่เสียโควต้า ไม่ส่งเข้ากลุ่มอื่น)
     um = _UPDATE_RE.match(received_text)
     if um:
+        if not allow("update"):
+            return
         date = parse_update_date(um.group(1))
         if date is None:
             reply = "รูปแบบ: Update 17 หรือ Update 17/10 หรือ Update 17/10/2026 (พิมพ์ Update เฉย ๆ = วันนี้)"
@@ -2285,26 +2438,36 @@ def _handle_text(event, conf):
 
     # คำสั่งอ่านอย่างเดียว (ใช้ได้ทุกกลุ่มที่บอทอยู่): help / ตัดตาราง / NOW
     if _HELP_RE.match(received_text):
+        if not allow("help"):
+            return
         print("📖 help")
         _reply_long(conf, event.reply_token, HELP_TEXT)
         return
     fm = _FULL_TABLE_RE.match(received_text)
     if fm:
+        if not allow("full_table"):
+            return
         print(f"📋 ดูตารางเต็ม {fm.group(1)!r}")
         _reply_long(conf, event.reply_token, full_table_text(fm.group(1)))
         return
     vm = _VIEW_JOB_RE.match(received_text)
     if vm:
+        if not allow("view_job"):
+            return
         print(f"🔎 ดูงาน {vm.group(1)}")
         _reply_long(conf, event.reply_token, view_job_text(vm.group(1), vm.group(2)))
         return
     cm = _CUT_RE.match(received_text)
     if cm:
+        if not allow("cut_table"):
+            return
         print(f"✂️ ตัดตาราง {cm.group(1)!r}")
         _reply_long(conf, event.reply_token, cut_table_text(cm.group(1)))
         return
     nm = _NOW_RE.match(received_text)
     if nm:
+        if not allow("now"):
+            return
         print(f"‼️ NOW {nm.group(1)}")
         _reply_long(conf, event.reply_token, now_text(nm.group(1), nm.group(2)))
         return
@@ -2324,6 +2487,8 @@ def _handle_text(event, conf):
     # "📌คืน" + ใบงานเดิมทั้งใบ -> ค้นใบงานจากเลข Order แล้วเปลี่ยนป้ายเป็น 📌
     rm = _RETURN_TICKET_RE.match(received_text)
     if rm:
+        if not allow("return"):
+            return
         ok, result = update_plate(rm.group(1).strip(), RETURN_MARK, sender_id=user_id)
         print(f"📌 คืนงานจากใบงาน {result['id']}" if ok else f"⚠️ คืนงานไม่สำเร็จ: {result}")
         if ok:
@@ -2332,6 +2497,8 @@ def _handle_text(event, conf):
 
     ret = parse_return_command(received_text)
     if ret:
+        if not allow("return"):
+            return
         ok, result = return_plate(*ret, sender_id=user_id)
         if ok:
             print(f"📌 คืนป้าย {result['id']} วันที่ {result['date']}")
@@ -2348,11 +2515,15 @@ def _handle_text(event, conf):
 
     um2 = _UNCANCEL_RE.match(received_text)
     if um2:
+        if not allow("uncancel"):
+            return
         ok, result = uncancel_job(um2.group(1), um2.group(2), user_id)
         print(f"↩️ uncancel {um2.group(1)}" if ok else f"⚠️ uncancel ไม่สำเร็จ: {result}")
         _reply_long(conf, event.reply_token, result if ok else f"⚠️ {result}")
         return
     if _UNCANCEL_LINE_RE.search(received_text) and _is_ticket_text(received_text):
+        if not allow("uncancel"):
+            return
         ok, result = uncancel_ticket(received_text, user_id)
         print("↩️ uncancel (ใบงาน)" if ok else f"⚠️ uncancel ไม่สำเร็จ: {result}")
         _reply_long(conf, event.reply_token, result if ok else f"⚠️ {result}")
@@ -2360,6 +2531,8 @@ def _handle_text(event, conf):
     if is_cancel_ticket(received_text) and (
             "【客户订单号】" in received_text or is_voucher_format(received_text)
             or is_kv_format(received_text) or is_plain_format(received_text)):
+        if not allow("cancel"):
+            return
         ok, result = cancel_job(received_text, sender_id=user_id)
         print(f"❌ ยกเลิกงาน {result['id']}" if ok else f"⚠️ ยกเลิกงานไม่สำเร็จ: {result}")
         if ok:
@@ -2371,21 +2544,29 @@ def _handle_text(event, conf):
     first_line_text = msg_lines[0] if msg_lines else ""
     cp = _CLEAR_PLATE_RE.match(received_text)
     if cp:
+        if not allow("clear_plate"):
+            return
         ok, result = clear_plate(cp.group(1), cp.group(2), user_id)
         print(f"🧹 ล้างทะเบียน {cp.group(1)}" if ok else f"⚠️ ล้างทะเบียนไม่สำเร็จ: {result}")
         _reply_long(conf, event.reply_token, result if ok else f"⚠️ {result}")
         return
     if _PRICE_HEAD_RE.match(first_line_text):
+        if not allow("price"):
+            return
         print("💰 แก้ไขราคา")
         _reply_long(conf, event.reply_token, price_command(msg_lines[1:], user_id))
         return
     cl = _CLOSE_RE.match(first_line_text)
     if cl and len(msg_lines) > 1 and extract_plate(received_text):
+        if not allow("close_job"):
+            return
         ok, result = close_job(cl.group(1), cl.group(2), "\n".join(msg_lines[1:]), user_id)
         print(f"🔒 ปิดใบงาน {cl.group(1)}" if ok else f"⚠️ ปิดใบงานไม่สำเร็จ: {result}")
         _reply_long(conf, event.reply_token, result if ok else f"⚠️ {result}")
         return
     if extract_plate(received_text):
+        if not allow("close_job"):
+            return
         ok, result = close_with_ticket(received_text, sender_id=user_id)
         print(("🔒 ปิดใบงาน (ใบงาน + ข้อมูลคนขับ)" + ("" if result else " ลำดับถูกอยู่แล้ว ไม่ตอบกลับ")) if ok
               else f"⚠️ ปิดใบงานไม่สำเร็จ: {result}")
@@ -2400,6 +2581,8 @@ def _handle_text(event, conf):
         print("ℹ️ ไม่ใช่ใบงาน (ไม่มี 【客户订单号】 หรือบรรทัด ชูป้าย)")
         return
 
+    if not allow("ticket", notify=False):
+        return
     ok, result = add_job_to_queue(received_text, sender_id=user_id)
     print(f"✅ รับใบงาน {result['id']} เข้าคิว" if ok else f"⚠️ ไม่รับใบงาน: {result}")
     if ok:
@@ -2869,6 +3052,10 @@ def _keep_alive_loop(url):
 def _start_background():
     load_settings()
     restore_state()
+    try:
+        _seen_groups.update(storage.get("seen_groups") or {})
+    except Exception as e:
+        print(f"⚠️ โหลดรายชื่อกลุ่มไม่สำเร็จ: {e}")
     try:
         persist_state()  # เขียนใบงานที่กู้คืนมาลงตาราง jobs ทันที (ย้ายข้อมูลเก่าเข้าตารางใหม่)
     except Exception as e:
