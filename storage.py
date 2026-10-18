@@ -183,6 +183,29 @@ def upsert_rows(table, rows, on_conflict):
     return True
 
 
+def delete_rows(table, column, value):
+    """ลบแถวที่ column = value ในตาราง (ใช้เฉพาะ Supabase) คืน True ถ้าลบแล้ว"""
+    if not using_supabase():
+        return False
+    if config_problem():
+        raise StorageError(config_problem())
+    try:
+        r = requests.delete(
+            _table_endpoint(table),
+            headers=_headers({"Prefer": "return=representation"}),
+            params={column: f"eq.{value}"},
+            timeout=TIMEOUT,
+        )
+    except requests.RequestException as e:
+        raise StorageError(f"เชื่อมต่อ Supabase ไม่ได้: {e}")
+    if r.status_code not in (200, 204):
+        raise StorageError(f"Supabase ({table}) ตอบกลับ {r.status_code}: {r.text[:200]}")
+    try:
+        return bool(r.json())
+    except ValueError:
+        return True
+
+
 def select_rows(table, params):
     """อ่านแถวจากตาราง คืน list (ว่างถ้าไม่ได้ใช้ Supabase)"""
     if not using_supabase():

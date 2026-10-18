@@ -537,6 +537,7 @@ def _rows_to_jobs(rows):
             "formatted_summary": r.get("summary", ""), "text": r.get("raw_text", ""),
             "status": r.get("status", ""), "state": r.get("state") or "normal", "plate": r.get("plate", ""),
             "events": r.get("events") or [], "received_at": r.get("received_at", ""), "from_history": True,
+            "uid": r.get("uid", ""),
         })
     return jobs
 
@@ -1209,6 +1210,30 @@ def _find_by_order(pool, order, date=None):
     return same
 
 
+def _job_uid(job):
+    """รหัสเฉพาะของใบงาน (วันที่|คีย์) ใช้อ้างอิงตอนลบและเป็นคีย์ในตาราง jobs"""
+    return f"{_norm_job_date(job.get('date'))}|{_job_key(job)}"
+
+
+def _order_ok(job):
+    o = str(job.get("order", "")).strip()
+    return bool(o) and o != "-"
+
+
+def _functional_sig(job):
+    return tuple(str(job.get(k, "")).strip().lower()
+                 for k in ("id", "time", "pickup", "dropoff", "flight", "car_code", "price")) + (_norm_job_date(job.get("date")),)
+
+
+def _same_job(a, b):
+    """ใบงานเดียวกันไหม: Order เดียวกัน หรือ (ทั้งคู่ไม่มี Order) รหัส/วันที่/เวลา/จุดรับ-ส่ง/เที่ยวบิน/รถ/ราคาตรงกันหมด"""
+    if _job_key(a) == _job_key(b):
+        return True
+    if not _order_ok(a) and not _order_ok(b):
+        return _functional_sig(a) == _functional_sig(b)
+    return False
+
+
 def add_job_to_queue(text, sender_id=None):
     """เพิ่มใบงานเข้าคิว คืน (สำเร็จไหม, ข้อมูลใบงาน หรือ ข้อความ)"""
     global latest_jobs, last_sender_id
@@ -1245,13 +1270,13 @@ def add_job_to_queue(text, sender_id=None):
         key = _job_key(job_item)
         new_date = _norm_job_date(job_item["date"])
         is_amend = bool(re.search(r'amend', text, re.IGNORECASE))
-        if any(_job_key(j) == key and _norm_job_date(j.get("date")) == new_date for j in job_queue):
+        if any(_same_job(j, job_item) and _norm_job_date(j.get("date")) == new_date for j in job_queue):
             log_activity("duplicate", job_item, "พบใบงานซ้ำในคิว (ไม่รับ)")
             return False, "ℹ️ ใบงานนี้อยู่ในคิวแล้ว (Order เดียวกัน) รอบอทสรุปสักครู่"
 
         # เคยรับใบงานนี้แล้ว (Order เดียวกัน): ส่งซ้ำข้อความเดิมเป๊ะ = ไม่รับ ถ้าแก้ไขแล้ว = รับ แต่คงป้ายทะเบียน/📌 เดิมไว้
         prev = next((j for j in latest_jobs
-                     if _job_key(j) == key and j.get("status") != "ยกเลิก"
+                     if _same_job(j, job_item) and j.get("status") != "ยกเลิก"
                      and (_norm_job_date(j.get("date")) == new_date or is_amend or j.get("raw_text") == text)), None)
         if prev:
             same_fields = all(str(prev.get(k, "")) == str(job_item.get(k, ""))
@@ -2412,7 +2437,7 @@ def api_status():
         if timer_start_time:
             time_left = max(0, int(wait_seconds - (time.time() - timer_start_time)))
         queue_count = len(job_queue)
-        jobs_copy = list(latest_jobs)
+        jobs_copy = [dict(j, uid=_job_uid(j)) for j in latest_jobs]
 
     return jsonify({
         "line_status": bool(LINE_CHANNEL_ACCESS_TOKEN and LINE_CHANNEL_SECRET),
@@ -2449,6 +2474,7 @@ def api_records():
                 continue
             seen.add(k)
             item["state"] = _job_state(j)
+            item["uid"] = _job_uid(j)
             jobs.append(item)
         activity, sent = list(_activity_log), list(_sent_log)
 
@@ -2612,6 +2638,34 @@ def api_delete_job(job_id=None):
 
     except Exception as e:
         return jsonify({"success": False, "message": str(e)}), 500
+
+
+@app.route("/api/delete_record", methods=["POST"])
+def api_delete_record():
+    """ลบใบงานออกจากระบบถาวร (หน่วยความจำ + คิว + ตาราง jobs ใน Supabase) อ้างด้วย uid จากหน้าเว็บ"""
+    global job_queue, latest_jobs
+    data = request.get_json(silent=True) or {}
+    uid = str(data.get("uid", "")).strip()
+    if not uid:
+        return jsonify({"success": False, "message": "ไม่พบรหัสใบงาน (uid)"}), 400
+    with state_lock:
+        victims = [j for j in latest_jobs + job_queue if _job_uid(j) == uid]
+        ids = {id(j) for j in victims}
+        latest_jobs = [j for j in latest_jobs if id(j) not in ids]
+        job_queue = [j for j in job_queue if id(j) not in ids]
+        sample = victims[0] if victims else None
+        if sample:
+            log_activity("delete", sample, "ลบจากหน้าเว็บ")
+    in_table = False
+    try:
+        in_table = bool(storage.delete_rows("jobs", "uid", uid))
+    except Exception as e:
+        print(f"⚠️ ลบแถวในตาราง jobs ไม่สำเร็จ: {e}")
+    _jobs_synced.pop(uid, None)
+    if not victims and not in_table:
+        return jsonify({"success": False, "message": "ไม่พบใบงานนี้ (อาจถูกลบไปแล้ว)"}), 404
+    persist_state()
+    return jsonify({"success": True, "message": f"ลบใบงาน {sample.get('id') if sample else ''} เรียบร้อยแล้ว"})
 
 
 @app.route("/api/clear_queue", methods=["POST"])
