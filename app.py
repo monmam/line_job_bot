@@ -1244,7 +1244,7 @@ def update_plate(text, plate, sender_id=None):
             for job in matches:
                 job["plate"] = plate
                 job["formatted_summary"] = apply_plate(job["formatted_summary"], plate)
-                mark_job(job, "return" if plate == RETURN_MARK else "plate", plate)
+                mark_job(job, "return" if plate == RETURN_MARK else "plate", f"{plate} (CAR NO + ใบงาน จาก …{str(sender_id or '-')[-6:]})")
                 if id(job) not in queued_keys and job.get("status") != "รอส่ง":
                     only_queued = False
             # ใบงานที่ส่งไปแล้ว -> ส่งใบสรุปของวันนั้นใหม่พร้อมป้ายทะเบียน
@@ -1266,7 +1266,7 @@ def update_plate(text, plate, sender_id=None):
         with state_lock:
             result["plate"] = plate
             result["formatted_summary"] = apply_plate(result["formatted_summary"], plate)
-            mark_job(result, "return" if plate == RETURN_MARK else "plate", plate)
+            mark_job(result, "return" if plate == RETURN_MARK else "plate", f"{plate} (CAR NO + ใบงาน ไม่พบใบงานเดิม จาก …{str(sender_id or '-')[-6:]})")
         persist_state()
         return True, result
 
@@ -1586,6 +1586,59 @@ def price_command(lines, sender_id=None):
     return "\n".join(results) or "ไม่พบรายการราคา เช่น\nแก้ไขราคา\nF01 +50\nF02 +100"
 
 
+_CLEAR_PLATE_RE = re.compile(r'^\s*(?:ล้าง|ลบ)ทะเบียน\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$')
+
+
+def clear_plate(job_id, date_text, sender_id=None):
+    """ล้างทะเบียน: เอาทะเบียน/📌 ออก กลับเป็นไอคอนเดิม (🔥 จุดส่งเป็นสนามบิน นอกนั้น 🥶)"""
+    job, err = resolve_job(job_id, date_text)
+    if err:
+        return False, err
+    with state_lock:
+        icon = "🔥" if job.get("dropoff") in ("แอร์ดอน", "แอร์สุ") else "🥶"
+        job["plate"] = ""
+        job["formatted_summary"] = apply_plate(job["formatted_summary"], icon)
+        if job.get("state") == "returned":
+            job["state"] = "normal"
+        mark_job(job, "plate", "ล้างทะเบียน")
+        _queue_compact_update(job, sender_id)
+        first = str(job["formatted_summary"]).splitlines()[0]
+    persist_state()
+    return True, f"✅ ล้างทะเบียนแล้ว: {first}"
+
+
+_FULL_TABLE_RE = re.compile(r'^\s*ดูตารางเต็ม\s*(.*?)\s*$')
+_VIEW_JOB_RE = re.compile(r'^\s*ดูงาน\s+([A-Za-z]+\d+)(?:\s*[-\s]\s*(\S+))?\s*$')
+
+
+def original_summary(job):
+    """ใบสรุปเต็มของงาน โดยวงเล็บเป็นไอคอนเดิมก่อนใส่ทะเบียน (🔥 จุดส่งเป็นสนามบิน นอกนั้น 🥶) งานที่ยกเลิกแสดง CANCEL"""
+    summary = str(job.get("formatted_summary", "")).strip()
+    if _job_state(job) == "cancelled":
+        return summary
+    icon = "🔥" if job.get("dropoff") in ("แอร์ดอน", "แอร์สุ") else "🥶"
+    return apply_plate(summary, icon)
+
+
+def full_table_text(date_text):
+    """ดูตารางเต็ม: ใบสรุปเต็มทุกงานของวันนั้น เรียงตามรหัส วงเล็บเป็นไอคอนเดิม"""
+    date = parse_update_date(date_text)
+    if date is None:
+        return "รูปแบบ: ดูตารางเต็ม หรือ ดูตารางเต็ม 18 หรือ ดูตารางเต็ม 18/10"
+    jobs = sorted(jobs_for_date(date), key=_id_sort_key)
+    if not jobs:
+        return f"ไม่มีใบงานวันที่ {date}"
+    return f"📅 {date}\n\n" + "\n\n".join(original_summary(j) for j in jobs)
+
+
+def view_job_text(job_id, date_text):
+    """ดูงาน F01-18: ใบสรุปเต็มของงานเดียว วงเล็บเป็นไอคอนเดิม"""
+    job, err = resolve_job(job_id, date_text)
+    if err:
+        return f"⚠️ {err}"
+    return original_summary(job)
+
+
 _CUT_RE = re.compile(r'^\s*ตัดตาราง\s*(.*?)\s*$')
 _NOW_RE = re.compile(r'^\s*(?:now|นาว)\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$', re.IGNORECASE)
 
@@ -1603,10 +1656,15 @@ def cut_table_text(date_text):
 
 
 def now_text(job_id, date_text):
+    """งานด่วน: 'นาววววว ขนาดรถ' / 'จุดรับ-จุดส่ง' / 'ราคา(+ส่วนปรับ)' คั่นด้วยบรรทัดว่าง"""
     job, err = resolve_job(job_id, date_text)
     if err:
         return f"⚠️ {err}"
-    return "‼️NOW‼️\n\n" + str(job["formatted_summary"]).strip()
+    if _job_state(job) == "cancelled":
+        return f"⚠️ {job.get('id')} ถูกยกเลิกแล้ว"
+    adj = job.get("price_adj")
+    price = f"{job.get('price', '')}{adj:+d}" if adj else f"{job.get('price', '')}"
+    return f"นาววววว  {job.get('car_code', '')}\n\n{job.get('pickup', '-')}-{job.get('dropoff', '-')}\n\n{price}"
 
 
 _HELP_RE = re.compile(r'^\s*(?:/?help|\?|คำสั่ง(?:ทั้งหมด)?|เมนู|วิธีใช้|ช่วยเหลือ)\s*$', re.IGNORECASE)
@@ -1627,60 +1685,79 @@ HELP_TEXT = """📖 รายการคำสั่งของบอท
 ✅ ได้ใบสรุปเต็มเฉพาะงานที่ยังไม่มีทะเบียน
 
 ━━━━━━━━━━━━━━
-3️⃣ งานด่วน NOW
-▶️ now F01
-▶️ นาว f01
-✅ ได้ ‼️NOW‼️ ตามด้วยใบสรุปของงานนั้น
+3️⃣ ดูตารางเต็ม
+▶️ ดูตารางเต็ม
+▶️ ดูตารางเต็ม 18
+✅ ได้ใบสรุปเต็มทุกงานของวันนั้น วงเล็บเป็น 🥶 / 🔥 เหมือนก่อนใส่ทะเบียน
 
 ━━━━━━━━━━━━━━
-4️⃣ ปิดใบงาน
+4️⃣ ดูงานเดียว
+▶️ ดูงาน F01-18
+▶️ ดูงาน F01  (ไม่ใส่วัน = วันนี้)
+✅ ได้ใบสรุปเต็มของงานนั้นอย่างเดียว วงเล็บเป็น 🥶 / 🔥
+
+━━━━━━━━━━━━━━
+5️⃣ งานด่วน NOW
+▶️ now F01
+▶️ นาว f01
+✅ ได้ข้อความงานด่วน 3 บรรทัด: นาววววว ขนาดรถ / จุดรับ-จุดส่ง / ราคา
+
+━━━━━━━━━━━━━━
+6️⃣ ปิดใบงาน
 ▶️ บรรทัดแรกพิมพ์  ใบงาน F01
 ▶️ บรรทัดถัดไปวางข้อมูลคนขับ (NAME / CAR NO / TEL / APP / TYPE CAR)
 ✅ ใส่ทะเบียน แล้วบอทตอบข้อมูลคนขับ + ใบงานต้นฉบับรวมกัน
 
 ━━━━━━━━━━━━━━
-5️⃣ ใส่ทะเบียนตามใบงานเดิม
+7️⃣ ใส่ทะเบียนตามใบงานเดิม
 ▶️ ข้อความ CAR NO : ... แล้วตามด้วยใบงานเดิม
 ✅ บอทหาใบงานจากเลข Order แล้วใส่ทะเบียนให้
 
 ━━━━━━━━━━━━━━
-6️⃣ คืนงาน (ป้าย 📌)
+8️⃣ คืนงาน (ป้าย 📌)
 ▶️ F22 คืน 16
 ▶️ F22 คืน 16/10
 ✅ เปลี่ยนป้ายงาน F22 ของวันที่ 16 เป็น 📌
 (รหัสซ้ำหลายวันแล้วไม่ใส่วัน บอทจะถามวัน)
 
 ━━━━━━━━━━━━━━
-7️⃣ คืนงานด้วยใบงานเต็ม
+9️⃣ คืนงานด้วยใบงานเต็ม
 ▶️ บรรทัดแรกพิมพ์  📌คืน
 ▶️ บรรทัดถัดไปวางใบงานเดิมทั้งใบ
 ✅ บอทหาจากเลข Order แล้วเปลี่ยนเป็น 📌
 
 ━━━━━━━━━━━━━━
-8️⃣ ยกเลิกงาน
+🔟 ยกเลิกงาน
 ▶️ วางใบงานเดิม แล้วเพิ่มบรรทัดสุดท้าย  cancel  (หรือ ยกเลิก)
 ✅ ในตารางจะเป็น  F09 ❌CANCEL❌
 
 ━━━━━━━━━━━━━━
-9️⃣ แก้ไขราคา
+1️⃣1️⃣ แก้ไขราคา
 ▶️ บรรทัดแรกพิมพ์  แก้ไขราคา  (หรือ อัพเดทราคา)
 ▶️ บรรทัดถัดไป  F01 +50  /  F02 -30
 ✅ ราคาในตารางเป็น 380+50 (เก็บถาวร, +0 = ยกเลิกส่วนปรับ, ระบุวันได้ เช่น F01 18 +50)
 
 ━━━━━━━━━━━━━━
-🔟 ขอ Group ID
+1️⃣2️⃣ ล้างทะเบียน
+▶️ ล้างทะเบียน VK05
+▶️ ล้างทะเบียน VK05 18
+✅ เอาทะเบียน (หรือ 📌) ออก กลับเป็น 🥶 / 🔥
+
+━━━━━━━━━━━━━━
+1️⃣3️⃣ ขอ Group ID
 ▶️ id  (พิมพ์ในกลุ่ม)
 ✅ บอทตอบรหัสกลุ่ม
 
 ━━━━━━━━━━━━━━
-1️⃣1️⃣ ดูคำสั่งทั้งหมด
+1️⃣4️⃣ ดูคำสั่งทั้งหมด
 ▶️ help  /  คำสั่ง  /  เมนู
 ✅ แสดงรายการนี้
 
 ━━━━━━━━━━━━━━
 📝 โยนใบงานเต็มในกลุ่มหรือแชทบอทได้เลย บอทย่อให้แล้วตอบกลับในที่ที่ส่งมา (ใช้ได้ทั้งกลุ่มและ LINE OA)
 📝 บอทตอบกลับในแชทที่พิมพ์เท่านั้น ไม่ส่งไปกลุ่มอื่น (ไม่เปลืองโควต้า)
-📝 กลุ่มไหนไม่อยากให้บอทอ่านใบงาน ไปเพิ่มกลุ่มในหน้า Settings แล้วเอาติ๊ก "อ่านใบงาน" ออก"""
+📝 กลุ่มไหนไม่อยากให้บอทอ่านใบงาน ไปเพิ่มกลุ่มในหน้า Settings แล้วเอาติ๊ก "อ่านใบงาน" ออก
+📝 ดาวน์โหลดข้อมูลทั้งหมดเป็น Excel หรือส่งไป Google Sheet ได้จากหน้าเว็บ (เมนู "บันทึกใบงาน")"""
 
 
 def _date_sort_key(d):
@@ -1913,6 +1990,16 @@ def _handle_text(event, conf):
         print("📖 help")
         _reply_long(conf, event.reply_token, HELP_TEXT)
         return
+    fm = _FULL_TABLE_RE.match(received_text)
+    if fm:
+        print(f"📋 ดูตารางเต็ม {fm.group(1)!r}")
+        _reply_long(conf, event.reply_token, full_table_text(fm.group(1)))
+        return
+    vm = _VIEW_JOB_RE.match(received_text)
+    if vm:
+        print(f"🔎 ดูงาน {vm.group(1)}")
+        _reply_long(conf, event.reply_token, view_job_text(vm.group(1), vm.group(2)))
+        return
     cm = _CUT_RE.match(received_text)
     if cm:
         print(f"✂️ ตัดตาราง {cm.group(1)!r}")
@@ -1973,6 +2060,12 @@ def _handle_text(event, conf):
     # คำสั่งแก้ข้อมูล: แก้ไขราคา / ปิดใบงาน
     msg_lines = received_text.splitlines()
     first_line_text = msg_lines[0] if msg_lines else ""
+    cp = _CLEAR_PLATE_RE.match(received_text)
+    if cp:
+        ok, result = clear_plate(cp.group(1), cp.group(2), user_id)
+        print(f"🧹 ล้างทะเบียน {cp.group(1)}" if ok else f"⚠️ ล้างทะเบียนไม่สำเร็จ: {result}")
+        _reply_long(conf, event.reply_token, result if ok else f"⚠️ {result}")
+        return
     if _PRICE_HEAD_RE.match(first_line_text):
         print("💰 แก้ไขราคา")
         _reply_long(conf, event.reply_token, price_command(msg_lines[1:], user_id))
