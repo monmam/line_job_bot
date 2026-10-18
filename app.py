@@ -1604,20 +1604,25 @@ _DRIVER_KEY_RE = re.compile(r'^\s*(?:NAME|CAR\s*NO\.?|TEL|APP|TYPE\s*CAR)\s*[:�
 
 
 def split_driver_block(text):
-    """แยกข้อมูลคนขับ (NAME / CAR NO / TEL / APP / TYPE CAR) ที่ต้นหรือท้ายข้อความ ออกจากใบงาน
-    คืน (บล็อกคนขับ, ใบงาน) ถ้าไม่เจอบล็อกคนขับคืน ("", ข้อความเดิม)"""
+    """แยกข้อมูลคนขับ (NAME / CAR NO / TEL / APP / TYPE CAR) ออกจากใบงาน โดยยึดบรรทัด CAR NO เป็นหลัก
+    ข้อความอื่นที่อยู่ก่อนบล็อกคนขับ (เช่น คำว่า Update) ไม่สนใจ
+    คืน (บล็อกคนขับ, ใบงาน, ตำแหน่งที่ส่งมา 'top'/'bottom'/None) ไม่เจอ CAR NO คืน ("", ข้อความเดิม, None)"""
     lines = text.strip().splitlines()
-    i = 0
-    while i < len(lines) and (not lines[i].strip() or _DRIVER_KEY_RE.match(lines[i])):
-        i += 1
-    if any(_DRIVER_KEY_RE.match(ln) for ln in lines[:i]):
-        return "\n".join(lines[:i]).strip(), "\n".join(lines[i:]).strip()
-    j = len(lines)
-    while j > 0 and (not lines[j - 1].strip() or _DRIVER_KEY_RE.match(lines[j - 1])):
-        j -= 1
-    if any(_DRIVER_KEY_RE.match(ln) for ln in lines[j:]):
-        return "\n".join(lines[j:]).strip(), "\n".join(lines[:j]).strip()
-    return "", text.strip()
+    a = next((i for i, ln in enumerate(lines) if re.match(r'^\s*CAR\s*NO\.?\s*[:：]', ln, re.IGNORECASE)), None)
+    if a is None:
+        return "", text.strip(), None
+    while a > 0 and _DRIVER_KEY_RE.match(lines[a - 1]):  # NAME : ... ที่อยู่เหนือ CAR NO
+        a -= 1
+    b = a
+    while b < len(lines) and (not lines[b].strip() or _DRIVER_KEY_RE.match(lines[b])):
+        b += 1
+    block = "\n".join(lines[a:b]).strip()
+    before, after = "\n".join(lines[:a]).strip(), "\n".join(lines[b:]).strip()
+    if _is_ticket_text(after):
+        return block, after, "top"
+    if _is_ticket_text(before):
+        return block, before, "bottom"
+    return block, (after or before), None
 
 
 def merge_close_text(job_code, driver_block, ticket):
@@ -1632,21 +1637,24 @@ def _is_ticket_text(text):
 
 
 def close_with_ticket(text, sender_id=None):
-    """ปิดใบงานด้วยข้อความเดียว: ใบงาน + ข้อมูลคนขับ (ต้นหรือท้าย) -> ใส่ทะเบียนตามเลข Order แล้วตอบข้อความรวม
-    คืน (สำเร็จไหม, ข้อความตอบ)"""
-    block, ticket = split_driver_block(text)
+    """ปิดใบงานด้วยข้อความเดียว: ใบงาน + ข้อมูลคนขับ -> ใส่ทะเบียนตามเลข Order
+    คืน (สำเร็จไหม, ข้อความตอบ) ข้อความตอบว่าง = ไม่ต้องตอบกลับ (ที่ส่งมาจัดลำดับถูกอยู่แล้ว)
+    ตอบข้อความรวมเฉพาะเมื่อต้องจัดลำดับใหม่: รหัส F ข้อมูลคนขับไว้บน รหัสอื่นไว้ล่าง"""
+    block, ticket, position = split_driver_block(text)
     plate = extract_plate(block)
     if not block or not plate:
-        return False, "ไม่พบข้อมูลคนขับ (บรรทัด CAR NO : ...) ที่ต้นหรือท้ายข้อความ"
+        return False, "ไม่พบข้อมูลคนขับ (บรรทัด CAR NO : ...) ในข้อความ"
     if not _is_ticket_text(ticket):
         return False, "ไม่พบใบงานในข้อความ แนบใบงานทั้งใบ หรือพิมพ์ ใบงาน F01 ไว้บรรทัดแรก"
     ok, result = update_plate(ticket, plate, sender_id=sender_id)
     if not ok:
         return False, str(result)
-    reply = merge_close_text(result.get("id"), block, ticket)
+    wanted = "top" if re.match(r'^F\d', str(result.get("id") or "").strip().upper()) else "bottom"
     if result.get("new"):
-        reply += "\n\n➕ ไม่พบใบงานเดิม เพิ่มเป็นใบงานใหม่แล้ว"
-    return True, reply
+        return True, merge_close_text(result.get("id"), block, ticket) + "\n\n➕ ไม่พบใบงานเดิม เพิ่มเป็นใบงานใหม่แล้ว"
+    if position == wanted:
+        return True, ""
+    return True, merge_close_text(result.get("id"), block, ticket)
 
 
 def close_job(job_id, date_text, block, sender_id=None):
@@ -1813,7 +1821,7 @@ HELP_TEXT = """📖 รายการคำสั่งของบอท
 6️⃣ ปิดใบงาน (ใส่ทะเบียน)
 ▶️ วิธีที่ 1: ส่งข้อมูลคนขับ (NAME / CAR NO / TEL / APP / TYPE CAR) พร้อมใบงานทั้งใบ จะวางคนขับไว้บนหรือล่างก็ได้
 ▶️ วิธีที่ 2: บรรทัดแรกพิมพ์  ใบงาน F01  แล้วบรรทัดถัดไปวางข้อมูลคนขับ (บอทดึงใบงานเดิมมาเอง)
-✅ ใส่ทะเบียนแล้วบอทตอบข้อความรวม ใบงานรหัส F: ข้อมูลคนขับไว้บน ใบงานแล้ว / ใบงานรหัสอื่น (VK, TT ...): ไว้ล่าง
+✅ ใส่ทะเบียนให้ทันที (ข้อความอื่นก่อน CAR NO เช่น Update ไม่สนใจ) ถ้าส่งมาถูกลำดับอยู่แล้วบอทไม่ตอบกลับ ถ้าสลับลำดับ บอทตอบข้อความที่จัดใหม่ให้: รหัส F ข้อมูลคนขับไว้บน / รหัสอื่น (VK, TT ...) ไว้ล่าง
 
 ━━━━━━━━━━━━━━
 7️⃣ คืนงาน (ป้าย 📌)
@@ -2180,8 +2188,12 @@ def _handle_text(event, conf):
         return
     if extract_plate(received_text):
         ok, result = close_with_ticket(received_text, sender_id=user_id)
-        print("🔒 ปิดใบงาน (ใบงาน + ข้อมูลคนขับ)" if ok else f"⚠️ ปิดใบงานไม่สำเร็จ: {result}")
-        _reply_long(conf, event.reply_token, result if ok else f"⚠️ {result}")
+        print(("🔒 ปิดใบงาน (ใบงาน + ข้อมูลคนขับ)" + ("" if result else " ลำดับถูกอยู่แล้ว ไม่ตอบกลับ")) if ok
+              else f"⚠️ ปิดใบงานไม่สำเร็จ: {result}")
+        if not ok:
+            _reply_long(conf, event.reply_token, f"⚠️ {result}")
+        elif result:
+            _reply_long(conf, event.reply_token, result)
         return
 
     if ("【客户订单号】" not in received_text and not is_voucher_format(received_text)
