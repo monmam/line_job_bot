@@ -1194,6 +1194,21 @@ def _job_key(job):
     return "text:" + str(job.get("text", "")).strip()
 
 
+def _find_by_order(pool, order, date=None):
+    """ใบงานที่เลข Order ตรงกัน ถ้ารู้วันที่ให้เลือกของวันเดียวกันก่อน
+    (Order เดียวกันต่างวัน = คนละงาน เช่น ขาไปและขากลับในการจองเดียว) ถ้าไม่มีวันเดียวกันค่อยใช้ Order อย่างเดียว"""
+    order = str(order or "").strip()
+    if not order or order == "-":
+        return []
+    same = [j for j in pool if str(j.get("order", "")).strip() == order]
+    if date and date != "-":
+        d = _norm_job_date(date)
+        exact = [j for j in same if _norm_job_date(j.get("date")) == d]
+        if exact:
+            return exact
+    return same
+
+
 def add_job_to_queue(text, sender_id=None):
     """เพิ่มใบงานเข้าคิว คืน (สำเร็จไหม, ข้อมูลใบงาน หรือ ข้อความ)"""
     global latest_jobs, last_sender_id
@@ -1228,13 +1243,16 @@ def add_job_to_queue(text, sender_id=None):
 
         # กันใบงานซ้ำ (เช่น LINE ส่ง webhook ซ้ำ หรือกดส่งซ้ำ)
         key = _job_key(job_item)
-        if any(_job_key(j) == key for j in job_queue):
+        new_date = _norm_job_date(job_item["date"])
+        is_amend = bool(re.search(r'amend', text, re.IGNORECASE))
+        if any(_job_key(j) == key and _norm_job_date(j.get("date")) == new_date for j in job_queue):
             log_activity("duplicate", job_item, "พบใบงานซ้ำในคิว (ไม่รับ)")
             return False, "ℹ️ ใบงานนี้อยู่ในคิวแล้ว (Order เดียวกัน) รอบอทสรุปสักครู่"
 
         # เคยรับใบงานนี้แล้ว (Order เดียวกัน): ส่งซ้ำข้อความเดิมเป๊ะ = ไม่รับ ถ้าแก้ไขแล้ว = รับ แต่คงป้ายทะเบียน/📌 เดิมไว้
         prev = next((j for j in latest_jobs
-                     if _job_key(j) == key and j.get("status") != "ยกเลิก"), None)
+                     if _job_key(j) == key and j.get("status") != "ยกเลิก"
+                     and (_norm_job_date(j.get("date")) == new_date or is_amend or j.get("raw_text") == text)), None)
         if prev:
             same_fields = all(str(prev.get(k, "")) == str(job_item.get(k, ""))
                               for k in ("id", "date", "time", "pickup", "dropoff", "flight", "car_code", "price"))
@@ -1293,8 +1311,7 @@ def update_plate(text, plate, sender_id=None):
     order = str(parsed.get("order", "")).strip()
 
     with state_lock:
-        matches = [j for j in job_queue + latest_jobs
-                   if order and order != "-" and str(j.get("order", "")).strip() == order]
+        matches = _find_by_order(job_queue + latest_jobs, order, parsed.get("date"))
         if matches:
             queued_keys = {id(j) for j in job_queue}
             only_queued = True
@@ -1410,7 +1427,7 @@ def cancel_job(text, sender_id=None):
     with state_lock:
         pool = job_queue + latest_jobs
         if order and order != "-":
-            matches = [j for j in pool if str(j.get("order", "")).strip() == order]
+            matches = _find_by_order(pool, order, parsed.get("date"))
         else:
             d = _norm_job_date(parsed.get("date"))
             matches = [j for j in pool if str(j.get("id", "")).strip().upper() == str(parsed.get("id", "")).strip().upper()
@@ -1726,6 +1743,15 @@ def _restore_cancelled(job, sender_id=None):
     return summary
 
 
+def _uncancel_reply(job, summary):
+    date = _norm_job_date(job.get("date"))
+    text_date = _norm_job_date(parse_job_text(job.get("text") or job.get("raw_text") or "").get("date"))
+    msg = f"✅ ดึงงานกลับมาแล้ว (วันที่ {date})\n\n{summary}"
+    if text_date and text_date != date and text_date != "-":
+        msg += f"\n\n⚠️ ข้อความต้นฉบับของใบงานนี้ระบุวันที่ {text_date} แต่ระบบบันทึกเป็นวันที่ {date} ตรวจสอบด้วย"
+    return msg
+
+
 def uncancel_job(job_id, date_text, sender_id=None):
     """uncancel F09 / uncancel F09 18 -> ดึงงานที่ยกเลิกกลับมา"""
     job, err = resolve_job(job_id, date_text)
@@ -1736,7 +1762,7 @@ def uncancel_job(job_id, date_text, sender_id=None):
     summary = _restore_cancelled(job, sender_id)
     if not summary:
         return False, f"{job.get('id')} ไม่มีข้อความต้นฉบับให้สร้างใบสรุปใหม่"
-    return True, "✅ ดึงงานกลับมาแล้ว\n\n" + summary
+    return True, _uncancel_reply(job, summary)
 
 
 def uncancel_ticket(text, sender_id=None):
@@ -1744,8 +1770,8 @@ def uncancel_ticket(text, sender_id=None):
     ticket = _UNCANCEL_LINE_RE.sub("", text).strip()
     order = str(parse_job_text(ticket).get("order", "")).strip()
     with state_lock:
-        job = next((j for j in latest_jobs if order and order != "-"
-                    and str(j.get("order", "")).strip() == order and j.get("status") != "ยกเลิก"), None)
+        job = next((j for j in _find_by_order(latest_jobs, order, parse_job_text(ticket).get("date"))
+                    if j.get("status") != "ยกเลิก"), None)
     if not job:
         return False, "ไม่พบใบงานเดิม (เลข Order นี้ยังไม่เคยถูกรับ)"
     if _job_state(job) != "cancelled":
@@ -1753,7 +1779,7 @@ def uncancel_ticket(text, sender_id=None):
     summary = _restore_cancelled(job, sender_id)
     if not summary:
         return False, f"{job.get('id')} ไม่มีข้อความต้นฉบับให้สร้างใบสรุปใหม่"
-    return True, "✅ ดึงงานกลับมาแล้ว\n\n" + summary
+    return True, _uncancel_reply(job, summary)
 
 
 _CLEAR_PLATE_RE = re.compile(r'^\s*(?:ล้าง|ลบ)ทะเบียน\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$')
