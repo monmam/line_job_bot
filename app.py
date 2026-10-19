@@ -114,6 +114,7 @@ COMMANDS = [
     {"id": "cancel", "name": "ยกเลิกงาน", "desc": "ใบงาน + บรรทัด cancel", "example": "ใบงาน + cancel"},
     {"id": "uncancel", "name": "ดึงงานที่ยกเลิกกลับ", "desc": "ยกเลิกการยกเลิก", "example": "uncancel F09 / un F09"},
     {"id": "price", "name": "แก้ไขราคา", "desc": "ปรับราคาต่อท้ายในตาราง", "example": "แก้ไขราคา / F01 +50"},
+    {"id": "edit_job", "name": "แก้ไขใบสรุป", "desc": "แก้เวลา / เส้นทาง / ขนาดรถ / Order ในใบสรุป (ค่าเดิม>ค่าใหม่)", "example": "VK01 19 13:25>20:00"},
     {"id": "clear_plate", "name": "ล้างทะเบียน", "desc": "เอาทะเบียนหรือ 📌 ออก", "example": "ล้างทะเบียน VK05"},
     {"id": "group_id", "name": "ขอ Group ID", "desc": "บอทตอบรหัสกลุ่ม (พิมพ์ในกลุ่ม)", "example": "id"},
     {"id": "help", "name": "เมนูคำสั่ง", "desc": "แสดงรายการคำสั่งทั้งหมด", "example": "help"},
@@ -920,8 +921,11 @@ _FLIGHT_LINE_RE = re.compile(r'^[A-Za-z0-9]{2}\s?\d{1,4}[A-Za-z]?$')
 _JOB_CODE_RE = re.compile(r'^[A-Za-z]{1,4}\d{1,4}$')
 _ORDER_LINE_RE = re.compile(r'^(?=.*\d)(?=.*[A-Za-z])[A-Za-z0-9_-]{6,}$')
 _PHONE_LINE_RE = re.compile(r'^\+?[\d\s()-]+$')
-_PLATE_RE = re.compile(r'CAR\s*NO\.?\s*[:：]\s*(.+)', re.IGNORECASE)
-_DRIVER_LINE_RE = re.compile(r'^\s*(?:CAR\s*NO|TEL|APP|TYPE\s*CAR)\.?\s*[:：]', re.IGNORECASE)
+# บรรทัดทะเบียนรถ: CAR NO / Car No. / Car Plate / ทะเบียนรถ / ทะเบียน (ต้นบรรทัด มี : หรือไม่มีก็ได้)
+_PLATE_RE = re.compile(r'^[ \t]*(?:CAR\s*NO\.?|CAR\s*PLATE|ทะเบียนรถ|ทะเบียน)[ \t]*[:：\-]?[ \t]*(\S.*)$',
+                       re.IGNORECASE | re.MULTILINE)
+_DRIVER_LINE_RE = re.compile(
+    r'^\s*(?:(?:CAR\s*NO|CAR\s*PLATE|ทะเบียนรถ|ทะเบียน)\.?\s*[:：\-]?|(?:TEL|APP|TYPE\s*CAR)\.?\s*[:：])', re.IGNORECASE)
 
 
 def _clean_lines(raw_text):
@@ -1428,6 +1432,16 @@ def add_job_to_queue(text, sender_id=None):
             if prev.get("price_adj"):
                 job_item["price_adj"] = prev["price_adj"]
                 job_item["formatted_summary"] = apply_price_adj(job_item["formatted_summary"], prev["price_adj"])
+            if prev.get("edits"):
+                keep = {}
+                for f, v in prev["edits"].items():
+                    if str(job_item.get(f)) == str((prev.get("edit_orig") or {}).get(f)):  # ใบงานใหม่ไม่ได้เปลี่ยนค่านี้ = คงที่เราแก้ไว้
+                        keep[f] = v
+                if keep:
+                    job_item.update(keep)
+                    job_item["edits"] = keep
+                    job_item["edit_orig"] = {f: prev["edit_orig"][f] for f in keep if f in prev.get("edit_orig", {})}
+                    job_item["formatted_summary"] = rebuild_summary(job_item)
             job_item["state"] = _job_state(prev)
             if job_item["state"] == "cancelled":
                 job_item["cancelled"] = True
@@ -1808,7 +1822,8 @@ def set_plate_manual(job, plate, detail, sender_id=None):
 _CLOSE_RE = re.compile(r'^\s*(?:ปิด)?ใบงาน\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$')
 
 
-_DRIVER_KEY_RE = re.compile(r'^\s*(?:NAME|CAR\s*NO\.?|TEL|APP|TYPE\s*CAR)\s*[:：]', re.IGNORECASE)
+_DRIVER_KEY_RE = re.compile(
+    r'^\s*(?:(?:CAR\s*NO\.?|CAR\s*PLATE|ทะเบียนรถ|ทะเบียน)\s*[:：\-]?\s*\S|(?:NAME|TEL|APP|TYPE\s*CAR)\s*[:：])', re.IGNORECASE)
 
 
 def split_driver_block(text):
@@ -1816,7 +1831,7 @@ def split_driver_block(text):
     ข้อความอื่นที่อยู่ก่อนบล็อกคนขับ (เช่น คำว่า Update) ไม่สนใจ
     คืน (บล็อกคนขับ, ใบงาน, ตำแหน่งที่ส่งมา 'top'/'bottom'/None) ไม่เจอ CAR NO คืน ("", ข้อความเดิม, None)"""
     lines = text.strip().splitlines()
-    a = next((i for i, ln in enumerate(lines) if re.match(r'^\s*CAR\s*NO\.?\s*[:：]', ln, re.IGNORECASE)), None)
+    a = next((i for i, ln in enumerate(lines) if _PLATE_RE.match(ln)), None)
     if a is None:
         return "", text.strip(), None
     while a > 0 and _DRIVER_KEY_RE.match(lines[a - 1]):  # NAME : ... ที่อยู่เหนือ CAR NO
@@ -1926,12 +1941,15 @@ def _restore_cancelled(job, sender_id=None):
         if not summary:
             return None
         plate = job.get("plate")
-        if plate:
-            summary = apply_plate(summary, plate)
-        if job.get("price_override") not in (None, ""):
-            summary = apply_price_value(summary, job["price_override"])
-        if job.get("price_adj"):
-            summary = apply_price_adj(summary, job["price_adj"])
+        if job.get("edits"):
+            summary = rebuild_summary(job)
+        else:
+            if plate:
+                summary = apply_plate(summary, plate)
+            if job.get("price_override") not in (None, ""):
+                summary = apply_price_value(summary, job["price_override"])
+            if job.get("price_adj"):
+                summary = apply_price_adj(summary, job["price_adj"])
         job["formatted_summary"] = summary
         job["cancelled"] = False
         job["state"] = "returned" if plate == RETURN_MARK else "normal"
@@ -2049,6 +2067,150 @@ def uncancel_ticket(text, sender_id=None):
     if summary:
         return True, "\n\n".join([_uncancel_reply(target, summary)] + notes) if not notes or notes[0][0] != "➕" else "\n\n".join(notes + [summary])
     return True, "\n\n".join(notes)
+
+
+_EDIT_HEAD_RE = re.compile(r'^\s*แก้ไข(?:ใบงาน|ใบสรุป|สรุป)\s*$')
+_EDIT_LINE_RE = re.compile(
+    r'^\s*([A-Za-z]+\d+)\s*(?:(\d{1,2}(?:[/\-.]\d{1,2}(?:[/\-.]\d{2,4})?)?)\s+)?(\S.*?)\s*(?:>|＞|→|->)\s*(\S.*?)\s*$')
+_TIME_ANY_RE = re.compile(r'^\d{1,2}[:.]\d{2}$')
+_AIRPORT_ALIASES = {"แอร์สุ": "แอร์สุ", "สุวรรณภูมิ": "แอร์สุ", "bkk": "แอร์สุ",
+                    "แอร์ดอน": "แอร์ดอน", "ดอนเมือง": "แอร์ดอน", "dmk": "แอร์ดอน"}
+
+
+def is_edit_message(lines):
+    """ทุกบรรทัด (ไม่นับหัว 'แก้ไขใบงาน') เป็นรูปแบบ  รหัส [วัน] ค่าเดิม>ค่าใหม่"""
+    body = [ln for ln in lines if ln.strip()]
+    if body and _EDIT_HEAD_RE.match(body[0]):
+        body = body[1:]
+    return bool(body) and all(_EDIT_LINE_RE.match(ln) for ln in body)
+
+
+def rebuild_summary(job):
+    """สร้างใบสรุปใหม่จากข้อมูลของใบงาน (เวลา/เส้นทาง/รถ/Order/ราคา/ทะเบียน) ใช้ตอนแก้ไขใบสรุป"""
+    icon = "🔥" if job.get("dropoff") in ("แอร์ดอน", "แอร์สุ") else "🥶"
+    mark = job.get("plate") or icon
+    adj = job.get("price_adj") or 0
+    price = f"{_effective_price(job)}{adj:+d}" if adj else f"{_effective_price(job)}"
+    route = f"{_place_code(job.get('pickup', '-'))}-{_place_code(job.get('dropoff', '-'))}"
+    return build_summary(str(job.get("id", "")), mark, job.get("time") or "-", price, job.get("car_code") or "5S", route,
+                         job.get("pickup") or "-", job.get("dropoff") or "-", job.get("flight") or "-", job.get("order") or "-")
+
+
+def _car_by_code(text):
+    t = str(text).strip().lower()
+    for v in CAR_PRICING_MAP.values():
+        if v["code"].lower() == t:
+            return v
+    return None
+
+
+def _norm_place(name):
+    n = name.strip()
+    if n == "แอร์":
+        raise ValueError("ระบุให้ชัดว่า แอร์สุ หรือ แอร์ดอน")
+    return _AIRPORT_ALIASES.get(n.lower(), n)
+
+
+def _split_route(text):
+    """'แอร์สุ-บางกะปิ' -> ('แอร์สุ', 'บางกะปิ') รองรับสนามบินที่ต้นหรือท้าย และชื่อสถานที่ที่มี - อยู่ข้างใน"""
+    t = text.strip()
+    for a in ("แอร์สุ", "แอร์ดอน"):
+        if t.startswith(a + "-"):
+            return a, t[len(a) + 1:].strip()
+        if t.endswith("-" + a):
+            return t[:-len(a) - 1].strip(), a
+    if "-" in t:
+        p, d = t.split("-", 1)
+        return _norm_place(p), _norm_place(d)
+    raise ValueError("เส้นทางต้องเป็นรูปแบบ จุดรับ-จุดส่ง")
+
+
+def _apply_edit(job, old, new, sender_id=None):
+    """แก้ 1 ค่าในใบงาน (เวลา / Order / ขนาดรถ / เส้นทาง) ตรวจว่า 'ค่าเดิม' ตรงกับที่ระบบมีก่อน คืน (สำเร็จไหม, ข้อความ)"""
+    code = job.get("id")
+    if _job_state(job) == "cancelled":
+        return False, f"{code} ถูกยกเลิกอยู่ ใช้ uncancel ก่อน"
+    edits, orig = job.setdefault("edits", {}), job.setdefault("edit_orig", {})
+    cur_order = str(job.get("order", "")).strip()
+    old_uid = None
+
+    def remember(field):
+        orig.setdefault(field, job.get(field))
+
+    if _TIME_ANY_RE.match(old):
+        if not _TIME_ANY_RE.match(new):
+            return False, f"เวลาใหม่ '{new}' รูปแบบไม่ถูก (เช่น 20:00)"
+        if _norm_time(old) != _norm_time(job.get("time", "")):
+            return False, f"เวลาเดิมของ {code} คือ {job.get('time')} ไม่ตรงกับ {old}"
+        remember("time")
+        job["time"] = edits["time"] = _norm_time(new)
+        kind = "เวลา"
+    elif cur_order not in ("", "-") and old == cur_order:
+        if re.search(r'\s', new):
+            return False, "Order ใหม่ต้องไม่มีช่องว่าง"
+        old_uid = _job_uid(job)
+        remember("order")
+        job["order"] = edits["order"] = new
+        kind = "Order"
+    elif _car_by_code(old) or _car_by_code(new):
+        car = _car_by_code(new)
+        if not car:
+            return False, f"ไม่รู้จักขนาดรถ '{new}'"
+        if str(job.get("car_code", "")).lower() != old.lower():
+            return False, f"ขนาดรถเดิมของ {code} คือ {job.get('car_code')} ไม่ตรงกับ {old}"
+        remember("car_code"), remember("price")
+        job["car_code"], job["price"] = car["code"], car["price"]
+        edits["car_code"], edits["price"] = car["code"], car["price"]
+        kind = "ขนาดรถ"
+    elif "-" in old or "-" in new:
+        try:
+            old_p, old_d = _split_route(old)
+            new_p, new_d = _split_route(new)
+        except ValueError as e:
+            return False, str(e)
+        if (old_p, old_d) != (job.get("pickup"), job.get("dropoff")):
+            return False, f"เส้นทางเดิมของ {code} คือ {job.get('pickup')}-{job.get('dropoff')} ไม่ตรงกับ {old}"
+        remember("pickup"), remember("dropoff")
+        job["pickup"] = job["pickup_display"] = edits["pickup"] = new_p
+        job["dropoff"] = job["dropoff_display"] = edits["dropoff"] = new_d
+        kind = "เส้นทาง"
+    else:
+        return False, (f"ไม่พบค่าเดิม '{old}' ใน {code} (เวลา {job.get('time')} • รถ {job.get('car_code')} • "
+                       f"เส้นทาง {job.get('pickup')}-{job.get('dropoff')} • Order {cur_order or '-'})")
+    job["formatted_summary"] = rebuild_summary(job)
+    mark_job(job, "edit", f"{kind}: {old} → {new}")
+    _queue_compact_update(job, sender_id)
+    if old_uid:  # Order เปลี่ยน = uid เปลี่ยน ลบแถวเก่าในตาราง jobs
+        _jobs_synced.pop(old_uid, None)
+        try:
+            storage.delete_rows("jobs", "uid", old_uid)
+        except Exception as e:
+            print(f"⚠️ ลบแถวเก่าในตาราง jobs ไม่สำเร็จ: {e}")
+    return True, ""
+
+
+def edit_job_command(lines, sender_id=None):
+    """แก้ไขใบสรุป: แต่ละบรรทัด 'VK01 19 13:25>20:00' / 'VK01 19 แอร์สุ-บางกะปิ>แอร์สุ-สีลม' / 'VK01 19 5S>EV-SUV' / 'VK01 19 ORDER>ORDERใหม่'"""
+    body = [ln for ln in lines if ln.strip()]
+    if body and _EDIT_HEAD_RE.match(body[0]):
+        body = body[1:]
+    results = []
+    for ln in body:
+        m = _EDIT_LINE_RE.match(ln)
+        if not m:
+            results.append(f"⚠️ อ่านไม่ออก: {ln.strip()}")
+            continue
+        job_id, date_text, old, new = m.groups()
+        job, err = resolve_job(job_id, date_text)
+        if err:
+            results.append(f"⚠️ {err}")
+            continue
+        with state_lock:
+            ok, msg = _apply_edit(job, old.strip(), new.strip(), sender_id)
+            first = str(job.get("formatted_summary", "")).splitlines()[0] if ok else ""
+        results.append(f"✅ {first}" if ok else f"⚠️ {msg}")
+    persist_state()
+    return "\n".join(results)
 
 
 _CLEAR_PLATE_RE = re.compile(r'^\s*(?:ล้าง|ลบ)ทะเบียน\s+([A-Za-z]+\d+)(?:\s+(\S+))?\s*$')
@@ -2169,7 +2331,7 @@ HELP_TEXT = """📖 รายการคำสั่งของบอท
 
 ━━━━━━━━━━━━━━
 6️⃣ ปิดใบงาน (ใส่ทะเบียน)
-▶️ วิธีที่ 1: ส่งข้อมูลคนขับ (NAME / CAR NO / TEL / APP / TYPE CAR) พร้อมใบงานทั้งใบ จะวางคนขับไว้บนหรือล่างก็ได้
+▶️ วิธีที่ 1: ส่งข้อมูลคนขับ (NAME / CAR NO / TEL / APP / TYPE CAR) พร้อมใบงานทั้งใบ จะวางคนขับไว้บนหรือล่างก็ได้ (ทะเบียนเขียนเป็น CAR NO, Car Plate, ทะเบียนรถ หรือ ทะเบียน ก็ได้)
 ▶️ วิธีที่ 2: บรรทัดแรกพิมพ์  ใบงาน F01  แล้วบรรทัดถัดไปวางข้อมูลคนขับ (บอทดึงใบงานเดิมมาเอง)
 ✅ ใส่ทะเบียนให้ทันที (ข้อความอื่นก่อน CAR NO เช่น Update ไม่สนใจ) ถ้าส่งมาถูกลำดับอยู่แล้วบอทไม่ตอบกลับ ถ้าสลับลำดับ บอทตอบข้อความที่จัดใหม่ให้: รหัส F ข้อมูลคนขับไว้บน / รหัสอื่น (VK, TT ...) ไว้ล่าง
 
@@ -2203,18 +2365,27 @@ HELP_TEXT = """📖 รายการคำสั่งของบอท
 ✅ ราคาในตารางเป็น 380+50 หรือ 200 (เก็บถาวร, +0 = ยกเลิกส่วนปรับ)
 
 ━━━━━━━━━━━━━━
-1️⃣1️⃣ ล้างทะเบียน
+1️⃣1️⃣ แก้ไขใบสรุป
+▶️ รหัส [วัน] ค่าเดิม>ค่าใหม่  (พิมพ์หลายบรรทัดได้)
+▶️ VK01 19 13:25>20:00  (เวลา)
+▶️ VK01 19 แอร์สุ-บางกะปิ>แอร์สุ-สีลม  (เส้นทาง)
+▶️ VK01 19 5S>EV-SUV  (ขนาดรถ ราคาตามตารางรถ)
+▶️ VK01 19 49VKK4JEQ18>50VKK4JEQ20  (เลข Order)
+✅ แก้ในใบสรุป ค่าเดิมต้องตรงกับที่ระบบมี ไม่ใส่วัน = วันนี้
+
+━━━━━━━━━━━━━━
+1️⃣2️⃣ ล้างทะเบียน
 ▶️ ล้างทะเบียน VK05
 ▶️ ล้างทะเบียน VK05 18
 ✅ เอาทะเบียน (หรือ 📌) ออก กลับเป็น 🥶 / 🔥
 
 ━━━━━━━━━━━━━━
-1️⃣2️⃣ ขอ Group ID
+1️⃣3️⃣ ขอ Group ID
 ▶️ id  (พิมพ์ในกลุ่ม)
 ✅ บอทตอบรหัสกลุ่ม
 
 ━━━━━━━━━━━━━━
-1️⃣3️⃣ ดูคำสั่งทั้งหมด
+1️⃣4️⃣ ดูคำสั่งทั้งหมด
 ▶️ help  /  คำสั่ง  /  เมนู
 ✅ แสดงรายการนี้
 
@@ -2443,8 +2614,8 @@ def _handle_text(event, conf):
         if _cmd_allowed(cmd, bot_key, ctx_group):
             return True
         print(f"⛔ ปิดคำสั่ง {cmd} ({bot_key}{', กลุ่ม ' + str(ctx_group) if ctx_group else ''})")
-        if notify:
-            _reply_text(conf, event.reply_token, "⛔ คำสั่งนี้ถูกปิดใช้งานสำหรับบอท/กลุ่มนี้")
+        if notify and not ctx_group:  # ในกลุ่มเงียบ ไม่ตอบอะไร ส่วนแชทส่วนตัวตอบแจ้งสั้น ๆ
+            _reply_text(conf, event.reply_token, "⛔ คำสั่งนี้ถูกปิดใช้งานสำหรับบอทนี้")
         return False
 
     if source_type == 'group' and received_text.lower() == "id":
@@ -2581,6 +2752,12 @@ def _handle_text(event, conf):
         ok, result = clear_plate(cp.group(1), cp.group(2), user_id)
         print(f"🧹 ล้างทะเบียน {cp.group(1)}" if ok else f"⚠️ ล้างทะเบียนไม่สำเร็จ: {result}")
         _reply_long(conf, event.reply_token, result if ok else f"⚠️ {result}")
+        return
+    if is_edit_message(msg_lines):
+        if not allow("edit_job"):
+            return
+        print("✏️ แก้ไขใบสรุป")
+        _reply_long(conf, event.reply_token, edit_job_command(msg_lines, user_id))
         return
     if _PRICE_HEAD_RE.match(first_line_text):
         if not allow("price"):
