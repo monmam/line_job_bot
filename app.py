@@ -1442,8 +1442,10 @@ def add_job_to_queue(text, sender_id=None):
                     job_item["edits"] = keep
                     job_item["edit_orig"] = {f: prev["edit_orig"][f] for f in keep if f in prev.get("edit_orig", {})}
                     job_item["formatted_summary"] = rebuild_summary(job_item)
-            if prev.get("compact_line"):  # ใบงานย่อที่แก้เป็นข้อความจากหน้าเว็บ: คงไว้ถ้าใบงานใหม่ไม่ได้เปลี่ยนส่วนนั้น
-                job_item["compact_line"], job_item["compact_orig"] = prev["compact_line"], prev.get("compact_orig")
+            if prev.get("compact_line") or prev.get("custom_summary"):  # ข้อความที่แก้จากหน้าเว็บ: คงไว้ถ้าใบงานใหม่ไม่ได้เปลี่ยนส่วนนั้น
+                for k in ("compact_line", "compact_orig", "custom_summary", "custom_orig"):
+                    if prev.get(k):
+                        job_item[k] = prev[k]
                 job_item["formatted_summary"] = _with_compact_line(job_item, job_item["formatted_summary"])
             job_item["state"] = _job_state(prev)
             if job_item["state"] == "cancelled":
@@ -2088,16 +2090,20 @@ def is_edit_message(lines):
     return bool(body) and all(_EDIT_LINE_RE.match(ln) for ln in body)
 
 
-def rebuild_summary(job):
-    """สร้างใบสรุปใหม่จากข้อมูลของใบงาน (เวลา/เส้นทาง/รถ/Order/ราคา/ทะเบียน) ใช้ตอนแก้ไขใบสรุป"""
-    icon = "🔥" if job.get("dropoff") in ("แอร์ดอน", "แอร์สุ") else "🥶"
+def _auto_summary(job):
+    """ใบสรุปที่สร้างจากข้อมูลใบงานล้วนๆ (ยังไม่ใส่ข้อความที่แก้เองจากหน้าเว็บ)"""
+    icon ="🔥" if job.get("dropoff") in ("แอร์ดอน", "แอร์สุ") else "🥶"
     mark = job.get("plate") or icon
     adj = job.get("price_adj") or 0
     price = f"{_effective_price(job)}{adj:+d}" if adj else f"{_effective_price(job)}"
     route = f"{_place_code(job.get('pickup', '-'))}-{_place_code(job.get('dropoff', '-'))}"
-    return _with_compact_line(job, build_summary(
-        str(job.get("id", "")), mark, job.get("time") or "-", price, job.get("car_code") or "5S", route,
-        job.get("pickup") or "-", job.get("dropoff") or "-", job.get("flight") or "-", job.get("order") or "-"))
+    return build_summary(str(job.get("id", "")), mark, job.get("time") or "-", price, job.get("car_code") or "5S", route,
+                         job.get("pickup") or "-", job.get("dropoff") or "-", job.get("flight") or "-", job.get("order") or "-")
+
+
+def rebuild_summary(job):
+    """สร้างใบสรุปใหม่จากข้อมูลของใบงาน (เวลา/เส้นทาง/รถ/Order/ราคา/ทะเบียน) ใช้ตอนแก้ไขใบสรุป"""
+    return _with_compact_line(job, _auto_summary(job))
 
 
 def _with_first_line(summary, line):
@@ -2108,7 +2114,10 @@ def _with_first_line(summary, line):
 
 def _with_compact_line(job, summary):
     """ใบงานย่อที่แก้เป็นข้อความเองจากหน้าเว็บ (compact_line): ใช้ทับบรรทัดแรก ตราบใดที่ข้อมูลใบงานยังไม่เปลี่ยนจากตอนแก้
-    (ถ้าภายหลังมีการแก้ค่าอื่น เช่น เวลา/ทะเบียน บรรทัดแรกจะไม่ตรงกับ compact_orig = ใช้ใบสรุปที่สร้างใหม่แทน)"""
+    (ถ้าภายหลังมีการแก้ค่าอื่น เช่น เวลา/ทะเบียน บรรทัดแรกจะไม่ตรงกับ compact_orig = ใช้ใบสรุปที่สร้างใหม่แทน)
+    ใบสรุปเต็มที่แก้เป็นข้อความเอง (custom_summary) ใช้หลักเดียวกัน เทียบกับ custom_orig ทั้งใบ"""
+    if job.get("custom_summary") and str(summary) == job.get("custom_orig"):
+        return job["custom_summary"]
     if job.get("compact_line") and str(summary).split("\n")[0] == job.get("compact_orig"):
         return _with_first_line(summary, job["compact_line"])
     return summary
@@ -2121,23 +2130,16 @@ def apply_compact_line(job, new_line):
     """แก้ใบงานย่อจากหน้าเว็บ: อ่านค่าในบรรทัดใหม่ (รหัส/ทะเบียน/เวลา/ราคา/ขนาดรถ) กลับเข้าข้อมูลใบงาน
     ให้ตรงกันทุกที่ (ใบเต็ม / Excel / Google Sheet) และไม่หายตอนสร้างใบสรุปใหม่หรือมีใบงานแก้ไขเข้ามา
     ส่วนที่แปลงกลับไม่ได้ (เช่น เปลี่ยนรหัสเส้นทาง หรือพิมพ์รูปแบบอื่น) เก็บเป็นข้อความทับไว้ (compact_line)"""
-    job.pop("compact_line", None)
-    job.pop("compact_orig", None)
+    for k in ("compact_line", "compact_orig", "custom_summary", "custom_orig"):
+        job.pop(k, None)
     m = _COMPACT_LINE_RE.match(new_line)
     if _job_state(job) == "cancelled" or not m:
         auto = str(job.get("formatted_summary", "")).split("\n")[0]
     else:
-        edits, orig = job.setdefault("edits", {}), job.setdefault("edit_orig", {})
-
-        def put(field, value):
-            if str(job.get(field, "")) != str(value):
-                orig.setdefault(field, job.get(field))
-                job[field] = edits[field] = value
-
-        put("id", m["id"])
-        put("time", _norm_time(m["time"].strip()) or "-")
+        _put_edit(job, "id", m["id"])
+        _put_edit(job, "time", _norm_time(m["time"].strip()) or "-")
         car = _car_by_code(m["car"])
-        put("car_code", car["code"] if car else m["car"].strip())
+        _put_edit(job, "car_code", car["code"] if car else m["car"].strip())
         if m["price"] != str(_effective_price(job)):
             job["price_override"] = m["price"]
         job["price_adj"] = int(m["adj"] or 0)
@@ -2152,6 +2154,48 @@ def apply_compact_line(job, new_line):
     if auto != new_line:
         job["compact_line"], job["compact_orig"] = new_line, auto
         job["formatted_summary"] = _with_first_line(job.get("formatted_summary"), new_line)
+
+
+def _put_edit(job, field, value):
+    """เปลี่ยนค่าในใบงาน + จำค่าเดิมไว้ (edits / edit_orig) ให้คงอยู่เมื่อมีใบงานแก้ไขเข้ามา"""
+    if str(job.get(field, "")) != str(value):
+        job.setdefault("edit_orig", {}).setdefault(field, job.get(field))
+        job[field] = job.setdefault("edits", {})[field] = value
+
+
+_SUMMARY_ROUTE_RE = re.compile(r'^(.+?)\s*✈️\s*(.*)$')
+
+
+def apply_full_summary(job, text):
+    """แก้ใบสรุปทั้งใบจากหน้าเว็บ (ใบงานเต็ม / คืนงาน / ยกเลิก)
+    บรรทัด 1 = ใบงานย่อ, บรรทัด 2 = จุดรับ-จุดส่ง ✈️เที่ยวบิน, บรรทัด 3 = Order -> อ่านกลับเข้าข้อมูลใบงาน
+    ส่วนที่อ่านกลับไม่ได้เก็บเป็นข้อความทับไว้ (custom_summary) คืน uid เดิมถ้า Order เปลี่ยน ไม่งั้น None"""
+    lines = text.split("\n")
+    if _job_state(job) == "cancelled":  # งานยกเลิก: ใบสรุปเป็นข้อความสั้น (F09 ❌CANCEL❌) เก็บตามที่พิมพ์
+        job["formatted_summary"] = text
+        return None
+    old_uid = None
+    m = _SUMMARY_ROUTE_RE.match(lines[1].strip()) if len(lines) > 1 else None
+    if m:
+        try:
+            p, d = _split_route(m[1])
+            _put_edit(job, "pickup", p)
+            _put_edit(job, "dropoff", d)
+            job["pickup_display"], job["dropoff_display"] = p, d
+        except ValueError:
+            pass
+        _put_edit(job, "flight", m[2].strip() or "-")
+    order = lines[2].strip() if len(lines) > 2 else ""
+    if order and not re.search(r'\s', order) and order != str(job.get("order") or "-"):
+        old_uid = _job_uid(job)
+        _put_edit(job, "order", order)
+    apply_compact_line(job, lines[0].strip())
+    raw = _auto_summary(job)
+    final = _with_compact_line(job, raw)
+    if final != text:
+        job["custom_summary"], job["custom_orig"] = text, raw
+    job["formatted_summary"] = text
+    return old_uid
 
 
 def _car_by_code(text):
@@ -3175,6 +3219,62 @@ def api_update_compact():
     persist_state()
     return jsonify({"success": True, "changed": changed,
                     "message": f"บันทึกใบงานย่อเรียบร้อยแล้ว ({changed} รายการ)" if changed else "ไม่มีการเปลี่ยนแปลง"})
+
+
+@app.route("/api/update_summary", methods=["POST"])
+def api_update_summary():
+    """แก้ใบสรุปทั้งใบจากหน้าเว็บ (แท็บใบงานเต็ม / คืนงาน / ยกเลิก)"""
+    data = request.get_json(silent=True) or {}
+    uid = str(data.get("uid") or "")
+    text = "\n".join(ln.rstrip() for ln in str(data.get("summary") or "").strip().split("\n"))
+    if not uid or not text:
+        return jsonify({"success": False, "message": "ใบสรุปว่างไม่ได้"}), 400
+
+    old_uids, found, changed = set(), False, False
+    with state_lock:
+        done = set()
+        for j in latest_jobs + job_queue:
+            if _job_uid(j) != uid or id(j) in done:
+                continue
+            done.add(id(j))
+            found = True
+            old = str(j.get("formatted_summary", ""))
+            if old.strip() == text:
+                continue
+            old_uid = apply_full_summary(j, text)
+            if old_uid:
+                old_uids.add(old_uid)
+            mark_job(j, "amend", "แก้ใบสรุปจากหน้าเว็บ: " + old.split("\n")[0] + " > " + text.split("\n")[0])
+            changed = True
+
+    if not found:  # ใบงานเก่าที่อยู่เฉพาะในตาราง jobs
+        try:
+            rows = storage.select_rows("jobs", {"uid": f"eq.{uid}", "select": "*", "limit": "1"})
+            if not rows:
+                return jsonify({"success": False, "message": "ไม่พบใบงานนี้ (อาจถูกลบไปแล้ว)"}), 404
+            job = _rows_to_jobs(rows)[0]
+            if str(job.get("formatted_summary", "")).strip() != text:
+                if apply_full_summary(job, text):
+                    old_uids.add(uid)
+                job["events"].append({"ts": _ts(), "type": "amend", "detail": "แก้ใบสรุปจากหน้าเว็บ"})
+                row = _job_row(job)
+                if job.get("price_override") not in (None, ""):
+                    row["price"] = str(job["price_override"])
+                storage.upsert_rows("jobs", [row], "uid")
+                changed = True
+        except Exception as e:
+            print(f"⚠️ แก้ใบสรุปในตาราง jobs ไม่สำเร็จ ({uid}): {e}")
+            return jsonify({"success": False, "message": f"บันทึกไม่สำเร็จ: {e}"}), 500
+
+    for u in old_uids:  # Order เปลี่ยน = uid เปลี่ยน ลบแถวเก่าในตาราง jobs
+        _jobs_synced.pop(u, None)
+        try:
+            storage.delete_rows("jobs", "uid", u)
+        except Exception as e:
+            print(f"⚠️ ลบแถวเก่าในตาราง jobs ไม่สำเร็จ: {e}")
+    persist_state()
+    return jsonify({"success": True, "changed": changed,
+                    "message": "บันทึกใบสรุปเรียบร้อยแล้ว" if changed else "ไม่มีการเปลี่ยนแปลง"})
 
 
 @app.route("/api/clear_queue", methods=["POST"])
