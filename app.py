@@ -2882,6 +2882,7 @@ def api_records():
         "date": date, "today": today, "dates": dates,
         "full": full,
         "compact": generate_compact_list(full) if full else "",
+        "compact_uids": [j.get("uid") or _job_uid(j) for j in full],
         "returns": [j for j in full if j["state"] == "returned"],
         "cancels": [j for j in full if j["state"] == "cancelled"],
         "activity": [a for a in reversed(activity) if a.get("date") == date][:200],
@@ -3058,6 +3059,59 @@ def api_delete_record():
         return jsonify({"success": False, "message": "ไม่พบใบงานนี้ (อาจถูกลบไปแล้ว)"}), 404
     persist_state()
     return jsonify({"success": True, "message": f"ลบใบงาน {sample.get('id') if sample else ''} เรียบร้อยแล้ว"})
+
+
+@app.route("/api/update_compact", methods=["POST"])
+def api_update_compact():
+    """แก้ไขใบงานย่อจากหน้าเว็บ: 1 บรรทัด = 1 ใบงาน (ตามลำดับ uids ที่หน้าเว็บส่งมา) แล้วบันทึกลงบรรทัดแรกของใบสรุปนั้น"""
+    data = request.get_json(silent=True) or {}
+    uids = data.get("uids") or []
+    lines = [str(x).strip() for x in (data.get("lines") or [])]
+    if not uids or len(uids) != len(lines):
+        return jsonify({"success": False, "message": f"จำนวนบรรทัดไม่ตรงกับจำนวนใบงาน (ต้องมี {len(uids)} บรรทัด ห้ามเพิ่ม/ลบบรรทัด)"}), 400
+    if any(not ln for ln in lines):
+        return jsonify({"success": False, "message": "มีบรรทัดว่าง กรุณากรอกให้ครบทุกบรรทัด"}), 400
+
+    def with_first_line(summary, new_line):
+        parts = str(summary or "").split("\n")
+        parts[0] = new_line
+        return "\n".join(parts)
+
+    changed, missing = 0, []
+    with state_lock:
+        for uid, new_line in zip(uids, lines):
+            hits = [j for j in latest_jobs + job_queue if _job_uid(j) == uid]
+            if not hits:
+                missing.append((uid, new_line))
+                continue
+            for j in hits:
+                old_line = str(j.get("formatted_summary", "")).split("\n")[0].strip()
+                if old_line == new_line:
+                    continue
+                j["formatted_summary"] = with_first_line(j.get("formatted_summary"), new_line)
+                mark_job(j, "amend", f"แก้ใบงานย่อจากหน้าเว็บ: {old_line} > {new_line}")
+                changed += 1
+
+    # ใบงานเก่าที่อยู่เฉพาะในตาราง jobs (ไม่อยู่ในหน่วยความจำ)
+    for uid, new_line in missing:
+        try:
+            rows = storage.select_rows("jobs", {"uid": f"eq.{uid}", "select": "*", "limit": "1"})
+            if not rows:
+                continue
+            row = rows[0]
+            if str(row.get("summary", "")).split("\n")[0].strip() == new_line:
+                continue
+            row["summary"] = with_first_line(row.get("summary"), new_line)
+            row["events"] = (row.get("events") or []) + [{"ts": _ts(), "type": "amend", "detail": "แก้ใบงานย่อจากหน้าเว็บ"}]
+            storage.upsert_rows("jobs", [row], "uid")
+            changed += 1
+        except Exception as e:
+            print(f"⚠️ แก้ใบงานย่อในตาราง jobs ไม่สำเร็จ ({uid}): {e}")
+            return jsonify({"success": False, "message": f"บันทึกไม่สำเร็จ: {e}"}), 500
+
+    persist_state()
+    return jsonify({"success": True, "changed": changed,
+                    "message": f"บันทึกใบงานย่อเรียบร้อยแล้ว ({changed} รายการ)" if changed else "ไม่มีการเปลี่ยนแปลง"})
 
 
 @app.route("/api/clear_queue", methods=["POST"])
