@@ -1007,7 +1007,7 @@
     }
 
     async function fetchRecords(date) {
-      if (date !== undefined) { recordsDate = date; compactEditing = false; }
+      if (date !== undefined) { recordsDate = date; compactEditing = false; cardEditing = false; }
       try {
         const res = await fetch('/api/records' + (recordsDate ? '?date=' + encodeURIComponent(recordsDate) : ''));
         if (!res.ok) return;
@@ -1039,10 +1039,40 @@
     function jobCard(job) {
       localJobs[jobKey(job)] = job;
       return '<div class="py-3 border-b border-[#F1F5F9] last:border-0">'
-        + '<div class="flex items-center justify-between gap-2"><button type="button" data-k="' + escapeHtml(jobKey(job)) + '" onclick="openJob(this.dataset.k)" class="text-left text-xs font-bold text-[#2563EB] hover:underline">' + escapeHtml(getJobVal(job, 'id')) + ' <span class="font-normal text-[#94A3B8]">' + escapeHtml(getJobVal(job, 'time')) + '</span></button><span class="flex items-center gap-2">' + stateBadge(job) + '<button type="button" data-k="' + escapeHtml(jobKey(job)) + '" onclick="deleteJob(this.dataset.k)" class="rounded bg-red-50 px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-100">ลบ</button></span></div>'
-        + '<pre class="mt-2 whitespace-pre-wrap rounded-lg bg-[#F8FAFC] p-3 text-xs leading-5 text-[#334155] border border-[#F1F5F9]">' + escapeHtml(job.formatted_summary || '') + '</pre>'
+        + '<div class="flex items-center justify-between gap-2"><button type="button" data-k="' + escapeHtml(jobKey(job)) + '" onclick="openJob(this.dataset.k)" class="text-left text-xs font-bold text-[#2563EB] hover:underline">' + escapeHtml(getJobVal(job, 'id')) + ' <span class="font-normal text-[#94A3B8]">' + escapeHtml(getJobVal(job, 'time')) + '</span></button><span class="flex items-center gap-2">' + stateBadge(job) + '<button type="button" data-k="' + escapeHtml(jobKey(job)) + '" onclick="startCardEdit(this)" class="rounded bg-blue-50 px-2 py-1 text-[11px] font-medium text-[#2563EB] hover:bg-blue-100">✏️ แก้ไข</button><button type="button" data-k="' + escapeHtml(jobKey(job)) + '" onclick="deleteJob(this.dataset.k)" class="rounded bg-red-50 px-2 py-1 text-[11px] font-medium text-red-600 hover:bg-red-100">ลบ</button></span></div>'
+        + '<div class="card-body"><pre class="mt-2 whitespace-pre-wrap rounded-lg bg-[#F8FAFC] p-3 text-xs leading-5 text-[#334155] border border-[#F1F5F9]">' + escapeHtml(job.formatted_summary || '') + '</pre></div>'
         + '<details class="mt-2 text-xs text-[#64748B]"><summary class="cursor-pointer">ข้อความต้นฉบับ</summary><pre class="mt-2 whitespace-pre-wrap rounded-lg bg-[#F8FAFC] p-3 text-xs border border-[#F1F5F9]">' + escapeHtml(job.text || job.raw_text || '') + '</pre></details>'
         + '</div>';
+    }
+
+    // ---------- แก้ไขใบสรุปทั้งใบ (แท็บใบงานเต็ม / คืนงาน / ยกเลิก) ----------
+    let cardEditing = false;
+
+    function startCardEdit(btn) {
+      const job = localJobs[btn.dataset.k];
+      const body = btn.closest('.py-3').querySelector('.card-body');
+      if (!job || !body) return;
+      cardEditing = true;
+      const summary = job.formatted_summary || '';
+      body.innerHTML = '<p class="mb-1 mt-2 text-[11px] text-[#64748B]">บรรทัด 1 = ใบงานย่อ • บรรทัด 2 = จุดรับ-จุดส่ง ✈️เที่ยวบิน • บรรทัด 3 = Order</p>'
+        + '<textarea rows="' + (summary.split('\n').length + 1) + '" spellcheck="false" class="card-edit-text w-full rounded-lg border border-[#2563EB] bg-white p-3 text-xs leading-6 text-[#334155] outline-none focus:ring-1 focus:ring-blue-100">' + escapeHtml(summary) + '</textarea>'
+        + '<div class="mt-2 flex justify-end gap-2"><button type="button" class="card-cancel rounded-lg border border-[#E2E8F0] px-3 py-1.5 text-xs font-medium text-[#64748B] hover:bg-[#F8FAFC]">ยกเลิก</button>'
+        + '<button type="button" class="card-save rounded-lg bg-[#2563EB] px-4 py-1.5 text-xs font-semibold text-white hover:bg-blue-700">บันทึก</button></div>';
+      body.querySelector('.card-cancel').onclick = () => { cardEditing = false; renderRecords(records); };
+      body.querySelector('.card-save').onclick = async (e) => {
+        const text = body.querySelector('.card-edit-text').value.trim();
+        if (!text) { showToast('ใบสรุปว่างไม่ได้'); return; }
+        e.target.disabled = true;
+        try {
+          const res = await fetch('/api/update_summary', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ uid: job.uid, summary: text }) });
+          const data = await res.json();
+          showToast(data.message || (data.success ? 'บันทึกแล้ว' : 'บันทึกไม่สำเร็จ'));
+          if (data.success) { cardEditing = false; fetchRecords(); fetchDashboardData(); return; }
+        } catch (err) {
+          showToast('บันทึกไม่สำเร็จ: เชื่อมต่อเซิร์ฟเวอร์ไม่ได้');
+        }
+        e.target.disabled = false;
+      };
     }
 
     // ---------- แก้ไขใบงานย่อ: 1 บรรทัด = 1 ใบงาน บันทึกแล้วเปลี่ยนที่ใบสรุปจริง (ใช้ตอนส่ง LINE / Excel ด้วย) ----------
@@ -1093,9 +1123,11 @@
         const editBtn = document.getElementById('edit-compact');
         if (editBtn) editBtn.onclick = () => startCompactEdit(d);
       }
-      set('rec-full', d.full.length ? d.full.map(jobCard).join('') : empty('ไม่มีใบงานเต็มของวันนี้'));
-      set('rec-returns', d.returns.length ? d.returns.map(jobCard).join('') : empty('ไม่มีงานที่คืน'));
-      set('rec-cancels', d.cancels.length ? d.cancels.map(jobCard).join('') : empty('ไม่มีงานที่ยกเลิก'));
+      if (!cardEditing) {   // กำลังแก้ใบสรุปอยู่ ห้ามวาดทับ
+        set('rec-full', d.full.length ? d.full.map(jobCard).join('') : empty('ไม่มีใบงานเต็มของวันนี้'));
+        set('rec-returns', d.returns.length ? d.returns.map(jobCard).join('') : empty('ไม่มีงานที่คืน'));
+        set('rec-cancels', d.cancels.length ? d.cancels.map(jobCard).join('') : empty('ไม่มีงานที่ยกเลิก'));
+      }
       set('rec-sent', d.sent.length ? d.sent.map(x =>
         '<div class="py-3 border-b border-[#F1F5F9] last:border-0"><div class="flex flex-wrap items-center gap-2 text-xs"><span class="text-[#94A3B8]">' + escapeHtml(x.ts) + '</span>'
         + '<span class="rounded bg-blue-50 px-1.5 py-0.5 font-semibold text-blue-600">' + (x.kind === 'compact' ? 'ใบงานย่อ' : 'ใบสรุป') + '</span>'
