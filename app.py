@@ -922,10 +922,10 @@ _JOB_CODE_RE = re.compile(r'^[A-Za-z]{1,4}\d{1,4}$')
 _ORDER_LINE_RE = re.compile(r'^(?=.*\d)(?=.*[A-Za-z])[A-Za-z0-9_-]{6,}$')
 _PHONE_LINE_RE = re.compile(r'^\+?[\d\s()-]+$')
 # บรรทัดทะเบียนรถ: CAR NO / Car No. / Car Plate / ทะเบียนรถ / ทะเบียน (ต้นบรรทัด มี : หรือไม่มีก็ได้)
-_PLATE_RE = re.compile(r'^[ \t]*(?:CAR\s*NO\.?|CAR\s*PLATE|ทะเบียนรถ|ทะเบียน)[ \t]*[:：\-]?[ \t]*(\S.*)$',
+_PLATE_RE = re.compile(r'^[ \t"\'“”]*(?:CAR\s*NO\.?|CAR\s*PLATE|ทะเบียนรถ|ทะเบียน)[ \t]*[:：\-]?[ \t]*(\S.*?)[ \t"\'“”]*$',
                        re.IGNORECASE | re.MULTILINE)
 _DRIVER_LINE_RE = re.compile(
-    r'^\s*(?:(?:CAR\s*NO|CAR\s*PLATE|ทะเบียนรถ|ทะเบียน)\.?\s*[:：\-]?|(?:TEL|APP|TYPE\s*CAR)\.?\s*[:：])', re.IGNORECASE)
+    r'^[\s"\'“”]*(?:(?:CAR\s*NO|CAR\s*PLATE|ทะเบียนรถ|ทะเบียน)\.?\s*[:：\-]?|(?:TEL|APP|TYPE\s*CAR)\.?\s*[:：])', re.IGNORECASE)
 
 
 def _clean_lines(raw_text):
@@ -1202,8 +1202,9 @@ def _parse_legacy(raw_text):
     # รหัสใบงาน = หัวข้อบรรทัดแรกของใบงาน (เช่น F03) รหัสอื่นก็ใช้ได้หมด
     job_id = ""
     for ln in raw_text.splitlines():
-        ln = ln.strip()
-        if not ln:
+        ln = ln.strip().strip(_QUOTES).strip()
+        # ข้ามบรรทัดข้อมูลคนขับ (CAR NO / TEL / APP / TYPE CAR) ที่ติดมากับใบงาน
+        if not ln or _DRIVER_KEY_RE.match(ln):
             continue
         # บรรทัดแรกต้องเป็นรหัสสั้นๆ ไม่ใช่บรรทัดข้อมูลที่ขึ้นต้นด้วย 【
         if "【" not in ln and "】" not in ln and len(ln) <= 20:
@@ -1828,7 +1829,7 @@ _CLOSE_RE = re.compile(r'^\s*(?:ปิด)?ใบงาน\s+([A-Za-z]+\d+)(?:\s
 
 
 _DRIVER_KEY_RE = re.compile(
-    r'^\s*(?:(?:CAR\s*NO\.?|CAR\s*PLATE|ทะเบียนรถ|ทะเบียน)\s*[:：\-]?\s*\S|(?:NAME|TEL|APP|TYPE\s*CAR)\s*[:：])', re.IGNORECASE)
+    r'^[\s"\'“”]*(?:(?:CAR\s*NO\.?|CAR\s*PLATE|ทะเบียนรถ|ทะเบียน)\s*[:：\-]?\s*\S|(?:NAME|TEL|APP|TYPE\s*CAR)\s*[:：])', re.IGNORECASE)
 
 
 def split_driver_block(text):
