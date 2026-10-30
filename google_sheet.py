@@ -1,162 +1,212 @@
 import os
-import time
-import requests
+import datetime
+import gspread
+from google.oauth2.service_account import Credentials
 
-SUPABASE_URL = os.getenv("SUPABASE_URL", "").rstrip("/")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY", "")
-TABLE = "jobs"
-
-# คอลัมน์ในตาราง jobs (ดู supabase_schema.sql)
-FIELDS = [
-    "job_code", "date", "time", "raw_text", "pickup", "dropoff", "flight",
-    "order_no", "car_code", "price", "formatted_summary", "sender_id", "status",
-]
-
-
-def enabled():
-    return bool(SUPABASE_URL and SUPABASE_KEY)
-
-
-def _headers(extra=None):
-    h = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-    }
-    if extra:
-        h.update(extra)
-    return h
-
-
-def _url():
-    return f"{SUPABASE_URL}/rest/v1/{TABLE}"
-
-
-def _to_row(item, sender_id=None):
-    return {
-        "job_code": item.get("id"),
-        "date": item.get("date"),
-        "time": item.get("time"),
-        "raw_text": item.get("raw_text"),
-        "pickup": item.get("pickup"),
-        "dropoff": item.get("dropoff"),
-        "flight": item.get("flight"),
-        "order_no": item.get("order"),
-        "car_code": item.get("car_code"),
-        "price": item.get("price"),
-        "formatted_summary": item.get("formatted_summary"),
-        "sender_id": sender_id,
-        "status": item.get("status", "รอส่ง"),
-    }
-
-
-def _to_item(row):
-    return {
-        "db_id": row["id"],
-        "id": row.get("job_code"),
-        "date": row.get("date"),
-        "time": row.get("time"),
-        "text": row.get("raw_text"),
-        "raw_text": row.get("raw_text"),
-        "pickup": row.get("pickup"),
-        "pickup_display": row.get("pickup"),
-        "dropoff": row.get("dropoff"),
-        "dropoff_display": row.get("dropoff"),
-        "flight": row.get("flight"),
-        "order": row.get("order_no"),
-        "car_code": row.get("car_code"),
-        "price": row.get("price"),
-        "formatted_summary": row.get("formatted_summary"),
-        "sender_id": row.get("sender_id"),
-        "status": row.get("status"),
-    }
-
-
-def insert_job(item, sender_id=None, retries=3):
-    """บันทึกใบงานใหม่ คืน db_id (ถ้าล้มเหลวทุกครั้งคืน None) ลองซ้ำเมื่อเน็ตสะดุด"""
-    for attempt in range(1, retries + 1):
-        try:
-            r = requests.post(
-                _url(),
-                headers=_headers({"Prefer": "return=representation"}),
-                json=_to_row(item, sender_id),
-                timeout=10,
-            )
-            r.raise_for_status()
-            return r.json()[0]["id"]
-        except Exception as e:
-            print(f"❌ Supabase insert ล้มเหลว (ครั้งที่ {attempt}/{retries}): {e}")
-            if attempt < retries:
-                time.sleep(1)
-    return None
-
-
-def load_pending():
-    """ใบงานที่ยังไม่ส่ง เรียงตามเวลาที่เข้า"""
-    return _select({"status": "eq.รอส่ง", "order": "id.asc"})
-
-
-def load_latest(limit=50):
-    """ใบงานล่าสุดสำหรับหน้าเว็บ (ใหม่สุดก่อน)"""
-    return _select({"order": "id.desc", "limit": str(limit)})
-
-
-def _select(params):
+def get_sheet_client():
+    """เชื่อมต่อ Google Sheets ด้วย Service Account"""
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive"
+    ]
+    
+    # กำหนดเส้นทางไฟล์: เช็คว่ามีในโฟลเดอร์ลับของ Render ไหม ถ้าไม่มีให้ใช้ชื่อไฟล์ปกติ
+    possible_paths = [
+        "/etc/secrets/credentials.json",
+        "credentials.json"
+    ]
+    
+    cred_file = None
+    for path in possible_paths:
+        if os.path.exists(path):
+            cred_file = path
+            break
+            
     try:
-        r = requests.get(_url(), headers=_headers(), params=params, timeout=10)
-        r.raise_for_status()
-        return [_to_item(row) for row in r.json()]
+        if not cred_file:
+            raise FileNotFoundError("ไม่พบไฟล์ credentials.json ทั้งในโฟลเดอร์หลักและ /etc/secrets/")
+            
+        creds = Credentials.from_service_account_file(cred_file, scopes=scopes)
+        client = gspread.authorize(creds)
+        return client
     except Exception as e:
-        print(f"❌ Supabase select ล้มเหลว: {e}")
-        return []
+        print(f"❌ Google Sheets Auth Error: {e}")
+        return None
 
+def normalize_pickup(text):
+    """แปลงค่าจุดรับตามเงื่อนไข (BKK -> แอร์สุ, DMK / DMK T1 -> แอร์ดอน)"""
+    if not text:
+        return "-"
+    t = text.strip().upper()
+    if "BKK" in t:
+        return "แอร์สุ"
+    if "DMK" in t:
+        return "แอร์ดอน"
+    return text
 
-def mark_sent(db_ids):
-    """เปลี่ยนสถานะเป็น 'ส่งแล้ว' คืน True ถ้าสำเร็จ"""
-    ids = [i for i in db_ids if i]
-    if not ids:
-        return True
-    try:
-        r = requests.patch(
-            _url(),
-            headers=_headers(),
-            params={"id": f"in.({','.join(str(i) for i in ids)})"},
-            json={"status": "ส่งแล้ว", "sent_at": "now()"},
-            timeout=10,
-        )
-        r.raise_for_status()
-        return True
-    except Exception as e:
-        print(f"❌ Supabase mark_sent ล้มเหลว: {e}")
+def normalize_dropoff(text):
+    """แปลงค่าจุดส่งจากภาษาอังกฤษเป็นภาษาไทยตามเขต/สถานที่สำคัญ"""
+    if not text:
+        return "-"
+    
+    mapping = {
+        "chatuchak": "จตุจักร",
+        "pathum wan": "ปทุมวัน",
+        "sukhumvit": "สุขุมวิท",
+        "bang rak": "บางรัก",
+        "siam": "สยาม",
+        "silom": "สีลม",
+        "sathorn": "สาทร",
+        "huai khwang": "ห้วยขวาง",
+        "wattana": "วัฒนา",
+        "ratchathewi": "ราชเทวี"
+    }
+    
+    t_lower = text.strip().lower()
+    for eng, th in mapping.items():
+        if eng in t_lower:
+            return th
+            
+    return text
+
+def save_to_google_sheets(spreadsheet_id, raw_jobs, summary_items):
+    """
+    บันทึกข้อมูลลง Sheet RAW_JOBS และ SUMMARY พร้อมแปลงข้อมูลจุดรับ-จุดส่ง
+    """
+    client = get_sheet_client()
+    if not client:
         return False
 
-
-def delete_jobs(target):
-    """ลบใบงานที่ job_code หรือ order_no ตรงกันทั้งตัว (ไม่ใช่บางส่วน)"""
     try:
-        r = requests.delete(
-            _url(),
-            headers=_headers({"Prefer": "return=representation"}),
-            params={"or": f"(job_code.eq.{target},order_no.eq.{target})"},
-            timeout=10,
-        )
-        r.raise_for_status()
-        return len(r.json())
+        spreadsheet = client.open_by_key(spreadsheet_id)
+        
+        # 1. บันทึกลง RAW_JOBS
+        try:
+            sheet_raw = spreadsheet.worksheet("RAW_JOBS")
+        except:
+            sheet_raw = spreadsheet.add_worksheet(title="RAW_JOBS", rows="1000", cols="10")
+            sheet_raw.append_row(["วันที่รับ", "วันที่ใบงาน", "รหัสใบงาน", "เวลา", "ข้อความใบงานต้นฉบับ", "Order Number", "สถานะ"])
+
+        now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        raw_rows = []
+        for raw in raw_jobs:
+            raw_rows.append([now_str, "-", "-", "-", raw, "-", "PROCESSED"])
+        sheet_raw.append_rows(raw_rows)
+
+        # 2. บันทึกลง SUMMARY (เรียงลำดับคอลัมน์ A ถึง K ให้ตรงกับ Google Sheets)
+        try:
+            sheet_sum = spreadsheet.worksheet("SUMMARY")
+        except:
+            sheet_sum = spreadsheet.add_worksheet(title="SUMMARY", rows="1000", cols="12")
+            sheet_sum.append_row(["วันที่", "รหัสใบงาน", "เวลา", "รถ", "ราคา", "จุดรับ", "จุดส่ง", "เที่ยวบิน", "Order Number", "ข้อความใบงานย่อ", "เวลาที่ส่ง"])
+
+        sum_rows = []
+        for item in summary_items:
+            raw_pickup = item.get("pickup", "")
+            raw_dropoff = item.get("dropoff", "")
+
+            sum_rows.append([
+                item.get("date", now_str.split()[0]),        # A: วันที่
+                item.get("id", ""),                          # B: รหัสใบงาน
+                item.get("time", ""),                        # C: เวลา
+                item.get("car_code", ""),                    # D: รถ
+                item.get("price", ""),                       # E: ราคา
+                normalize_pickup(raw_pickup),                # F: จุดรับ (แปลงค่าแล้ว)
+                normalize_dropoff(raw_dropoff),              # G: จุดส่ง (แปลงค่าแล้ว)
+                item.get("flight", ""),                      # H: เที่ยวบิน
+                item.get("order", ""),                       # I: Order Number
+                item.get("formatted_summary", ""),           # J: ข้อความใบงานย่อ
+                now_str                                      # K: เวลาที่ส่ง
+            ])
+        sheet_sum.append_rows(sum_rows)
+        return True
     except Exception as e:
-        print(f"❌ Supabase delete ล้มเหลว: {e}")
-        return 0
+        print(f"Google Sheet Save Error: {e}")
+        return False
 
-
-def clear_pending():
+def delete_row_from_google_sheets(spreadsheet_id, target_id):
+    """ลบแถวข้อมูลใน Google Sheets (ทั้ง SUMMARY และ RAW_JOBS) รองรับทั้งการค้นหาด้วย ID, Order และข้อความ"""
+    client = get_sheet_client()
+    if not client or not spreadsheet_id:
+        return False
+    
+    target_str = str(target_id).strip()
+    success = False
+    order_number_to_find = None
+    row_text_to_find = None
+    
     try:
-        r = requests.delete(
-            _url(),
-            headers=_headers({"Prefer": "return=representation"}),
-            params={"status": "eq.รอส่ง"},
-            timeout=10,
-        )
-        r.raise_for_status()
-        return len(r.json())
+        spreadsheet = client.open_by_key(spreadsheet_id)
+        
+        # 1. ค้นหาและลบจากชีต SUMMARY พร้อมเก็บข้อมูลสำคัญไว้ใช้เทียบกับ RAW_JOBS
+        try:
+            sheet_sum = spreadsheet.worksheet("SUMMARY")
+            records_sum = sheet_sum.get_all_records()
+            row_to_delete_sum = None
+            
+            for idx, row in enumerate(records_sum):
+                job_id_val = str(row.get("รหัสใบงาน", "")).strip()
+                order_val = str(row.get("Order Number", "")).strip()
+                
+                if job_id_val == target_str or order_val == target_str:
+                    row_to_delete_sum = idx + 2 # บวก 2 ชดเชย Header และ 0-index
+                    if order_val and order_val != "-":
+                        order_number_to_find = order_val
+                    break
+            
+            if row_to_delete_sum:
+                # ดึงข้อความหรือรายละเอียดของแถวนี้ก่อนลบ เพื่อเอาไปเทียบกับ RAW_JOBS
+                row_values_sum = sheet_sum.row_values(row_to_delete_sum)
+                sheet_sum.delete_rows(row_to_delete_sum)
+                print(f"🗑️ ลบแถวที่ {row_to_delete_sum} ในชีต SUMMARY สำเร็จ")
+                success = True
+        except Exception as e:
+            print(f"⚠️ Error deleting from SUMMARY: {e}")
+
+        # 2. ลบจากชีต RAW_JOBS
+        try:
+            sheet_raw = spreadsheet.worksheet("RAW_JOBS")
+            rows_raw = sheet_raw.get_all_values()
+            
+            # วนลูปจากล่างขึ้นบนเพื่อป้องกัน index เพี้ยน
+            for idx in range(len(rows_raw) - 1, 0, -1):
+                row_values = rows_raw[idx]
+                # เทียบเลข Order ตรงทั้งเซลล์ (คอลัมน์ Order Number) ไม่ใช้ substring
+                cells = [str(val).strip() for val in row_values]
+                keys = {target_str}
+                if order_number_to_find:
+                    keys.add(order_number_to_find)
+                match_found = any(c in keys for c in cells if c and c != "-")
+                if not match_found:
+                    # ข้อความใบงานต้นฉบับ: ต้องมีเลข Order ตรงกัน (ไม่ใช่รหัสสั้นๆ อย่าง F16)
+                    raw_cell = cells[4] if len(cells) > 4 else ""
+                    match_found = bool(order_number_to_find) and order_number_to_find in raw_cell
+                    
+                if match_found:
+                    sheet_raw.delete_rows(idx + 1)
+                    print(f"🗑️ ลบแถวที่ {idx + 1} ในชีต RAW_JOBS สำเร็จ")
+                    success = True
+                    # ไม่ break ทันที เผื่อมีหลายแถวที่ตรงกัน
+        except Exception as e:
+            print(f"⚠️ Error deleting from RAW_JOBS: {e}")
+
+        return success
     except Exception as e:
-        print(f"❌ Supabase clear ล้มเหลว: {e}")
-        return 0
+        print(f"❌ Google Sheet Delete Error: {e}")
+        return False
+
+def get_all_summary_jobs(spreadsheet_id):
+    """ดึงข้อมูลทั้งหมดจากชีต SUMMARY เพื่อนำไปแสดงผลหน้าเว็บ"""
+    client = get_sheet_client()
+    if not client or not spreadsheet_id:
+        return []
+    
+    try:
+        spreadsheet = client.open_by_key(spreadsheet_id)
+        sheet_sum = spreadsheet.worksheet("SUMMARY")
+        # gspread จะดึงข้อมูลมาเป็น List ของ Dictionary โดยใช้หัวตารางเป็น Key
+        records = sheet_sum.get_all_records()
+        return records
+    except Exception as e:
+        print(f"❌ Error fetching summary jobs: {e}")
+        return []
