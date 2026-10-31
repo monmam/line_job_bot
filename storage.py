@@ -11,7 +11,9 @@
 """
 import os
 import json
+import shutil
 import threading
+import time
 
 import requests
 
@@ -21,8 +23,10 @@ SUPABASE_KEY = (
     or os.getenv("SUPABASE_KEY", "").strip()
 )
 TABLE = os.getenv("SUPABASE_TABLE", "bot_store").strip() or "bot_store"
-LOCAL_FILE = "local_store.json"
-LEGACY_SETTINGS_FILE = "settings.json"
+# อิงโฟลเดอร์ของโปรแกรม (เปิดบอทจากโฟลเดอร์อื่นก็ยังอ่านไฟล์เดิม ไม่ใช่ไฟล์ว่างไฟล์ใหม่)
+_BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+LOCAL_FILE = os.getenv("LOCAL_STORE_FILE", "").strip() or os.path.join(_BASE_DIR, "local_store.json")
+LEGACY_SETTINGS_FILE = os.path.join(_BASE_DIR, "settings.json")
 TIMEOUT = 10
 
 _local_lock = threading.Lock()
@@ -76,14 +80,23 @@ def _read_local():
     try:
         with open(LOCAL_FILE, "r", encoding="utf-8") as f:
             return json.load(f)
-    except Exception:
-        return {}
+    except Exception as e:
+        # ไฟล์เสีย: ห้ามคืนค่าว่าง (จะถูกบันทึกทับจนข้อมูลหาย) เก็บไฟล์เสียไว้กู้คืน แล้วแจ้งข้อผิดพลาด
+        bad = f"{LOCAL_FILE}.bad-{time.strftime('%Y%m%d-%H%M%S')}"
+        try:
+            os.replace(LOCAL_FILE, bad)
+        except OSError:
+            bad = LOCAL_FILE
+        raise StorageError(f"อ่าน {os.path.basename(LOCAL_FILE)} ไม่ได้ ({e}) เก็บไฟล์เดิมไว้ที่ {bad} "
+                           f"กู้คืนได้จาก {os.path.basename(LOCAL_FILE)}.bak")
 
 
 def _write_local(data):
     tmp = LOCAL_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    if os.path.exists(LOCAL_FILE):  # สำรองฉบับก่อนหน้าไว้ 1 ชุด
+        shutil.copy2(LOCAL_FILE, LOCAL_FILE + ".bak")
     os.replace(tmp, LOCAL_FILE)
 
 
