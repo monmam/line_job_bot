@@ -3,6 +3,16 @@ import datetime
 import gspread
 from google.oauth2.service_account import Credentials
 
+CREDENTIAL_PATHS = [
+    "/etc/secrets/credentials.json",
+    "credentials.json"
+]
+
+
+def has_credentials():
+    return any(os.path.exists(p) for p in CREDENTIAL_PATHS)
+
+
 def get_sheet_client():
     """เชื่อมต่อ Google Sheets ด้วย Service Account"""
     scopes = [
@@ -11,10 +21,7 @@ def get_sheet_client():
     ]
     
     # กำหนดเส้นทางไฟล์: เช็คว่ามีในโฟลเดอร์ลับของ Render ไหม ถ้าไม่มีให้ใช้ชื่อไฟล์ปกติ
-    possible_paths = [
-        "/etc/secrets/credentials.json",
-        "credentials.json"
-    ]
+    possible_paths = CREDENTIAL_PATHS
     
     cred_file = None
     for path in possible_paths:
@@ -148,7 +155,7 @@ def delete_row_from_google_sheets(spreadsheet_id, target_id):
                 job_id_val = str(row.get("รหัสใบงาน", "")).strip()
                 order_val = str(row.get("Order Number", "")).strip()
                 
-                if job_id_val == target_str or order_val == target_str:
+                if job_id_val == target_str or order_val == target_str or target_str in job_id_val:
                     row_to_delete_sum = idx + 2 # บวก 2 ชดเชย Header และ 0-index
                     if order_val and order_val != "-":
                         order_number_to_find = order_val
@@ -171,16 +178,13 @@ def delete_row_from_google_sheets(spreadsheet_id, target_id):
             # วนลูปจากล่างขึ้นบนเพื่อป้องกัน index เพี้ยน
             for idx in range(len(rows_raw) - 1, 0, -1):
                 row_values = rows_raw[idx]
-                # เทียบเลข Order ตรงทั้งเซลล์ (คอลัมน์ Order Number) ไม่ใช้ substring
-                cells = [str(val).strip() for val in row_values]
-                keys = {target_str}
-                if order_number_to_find:
-                    keys.add(order_number_to_find)
-                match_found = any(c in keys for c in cells if c and c != "-")
-                if not match_found:
-                    # ข้อความใบงานต้นฉบับ: ต้องมีเลข Order ตรงกัน (ไม่ใช่รหัสสั้นๆ อย่าง F16)
-                    raw_cell = cells[4] if len(cells) > 4 else ""
-                    match_found = bool(order_number_to_find) and order_number_to_find in raw_cell
+                row_str = " ".join(str(val) for val in row_values)
+                
+                match_found = False
+                if order_number_to_find and order_number_to_find in row_str:
+                    match_found = True
+                elif target_str in row_str:
+                    match_found = True
                     
                 if match_found:
                     sheet_raw.delete_rows(idx + 1)

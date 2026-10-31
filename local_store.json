@@ -1,0 +1,9 @@
+{
+  "job_state": {
+    "job_queue": [],
+    "latest_jobs": [],
+    "last_sender_id": null,
+    "timer_start_time": null,
+    "pending_update_dates": []
+  }
+}
