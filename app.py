@@ -3,7 +3,9 @@ import re
 import json
 import copy
 import time
+import atexit
 import threading
+import uuid
 import datetime
 
 import requests
@@ -313,6 +315,15 @@ _sent_log = []         # บันทึกการส่ง: ใบสรุ�
 _logs_dirty = False
 # โหลดข้อมูลเดิมสำเร็จแล้วหรือยัง ถ้ายังห้ามบันทึกทับ (กันโหลดไม่ทันตอนเครื่องตื่น แล้วเขียนคิวว่างทับข้อมูลจริง)
 _state_loaded = False
+# ---- บันทึกตรวจสอบ (audit) ใบงานหาย: ใครลบ/ล้าง/ตัด/โหลดไม่ได้/จำนวนลดผิดปกติ ดูได้ที่ /audit ----
+AUDIT_CAP = 2000
+_audit_log = []
+_audit_dirty = False
+INSTANCE_ID = uuid.uuid4().hex[:6]   # รหัสรอบการทำงานของเซิร์ฟเวอร์ (เปลี่ยนทุกครั้งที่รีสตาร์ท / ถ้าเห็น 2 รหัสสลับกัน = มี 2 เครื่องรันพร้อมกัน)
+_persist_lock = threading.Lock()     # ให้บันทึกทีละครั้ง กันบันทึกเก่าทับบันทึกใหม่
+_last_saved = {"count": None, "snap": None}
+_expected_drop = 0                   # จำนวนใบงานที่ตั้งใจให้หาย (ลบ/ล้าง/ตัดเก่า) ตั้งแต่บันทึกครั้งก่อน
+SHRINK_ALERT = 3                     # ลดลงเกินนี้โดยไม่ได้ตั้งใจ = แจ้งเตือน + เก็บสำเนาฉบับก่อนหน้า
 
 # ค่าเริ่มต้นพจนานุกรมรายชื่อถนนหลัก (อังกฤษ = ไทย)
 DEFAULT_MAIN_ROADS_DICT = {
@@ -568,6 +579,18 @@ def log_activity(kind, job=None, detail=""):
         _logs_dirty = True
 
 
+def audit(event, detail="", expected_drop=0):
+    """บันทึกเหตุการณ์ระดับระบบที่เกี่ยวกับใบงานหาย พร้อมจำนวนใบงานในคิว/ประวัติ ณ ตอนนั้น"""
+    global _audit_dirty, _expected_drop
+    with state_lock:
+        _audit_log.append({"ts": _ts(), "inst": INSTANCE_ID, "event": event, "detail": detail,
+                           "queue": len(job_queue), "history": len(latest_jobs), "loaded": _state_loaded})
+        del _audit_log[:-AUDIT_CAP]
+        _audit_dirty = True
+        _expected_drop += expected_drop
+    print(f"🔎 AUDIT[{INSTANCE_ID}] {event}: {detail} (คิว {len(job_queue)} / ประวัติ {len(latest_jobs)})")
+
+
 def log_sent(kind, text, dates, results):
     """results = [(ปลายทาง, สำเร็จไหม, reply/push)]"""
     global _logs_dirty
@@ -603,8 +626,15 @@ def _prune_jobs():
     global latest_jobs
     cutoff = _date_sort_key((now_th() - datetime.timedelta(days=KEEP_DAYS)).strftime("%d/%m/%Y"))
     queued = {id(j) for j in job_queue}
+    before = list(latest_jobs)
     latest_jobs = [j for j in latest_jobs
                    if id(j) in queued or _date_sort_key(_norm_job_date(j.get("date"))) >= cutoff][:MAX_HISTORY]
+    kept = {id(j) for j in latest_jobs}
+    gone = [j for j in before if id(j) not in kept]
+    if gone:
+        names = ", ".join(f"{j.get('id','?')}({_norm_job_date(j.get('date'))})" for j in gone[:15])
+        audit("prune", f"ตัดใบงานเก่าเกิน {KEEP_DAYS} วัน/เกิน {MAX_HISTORY} ใบ จำนวน {len(gone)}: {names}",
+              expected_drop=len(gone))
 
 
 
@@ -701,40 +731,63 @@ def history_dates():
 
 
 def persist_state():
-    """บันทึกคิว + ประวัติใบงานลง Supabase (กันข้อมูลหายตอนเซิร์ฟเวอร์หลับ)"""
-    with state_lock:
-        snapshot = {
-            "job_queue": list(job_queue),
-            "latest_jobs": list(latest_jobs),
-            "last_sender_id": last_sender_id,
-            "timer_start_time": timer_start_time,
-            "pending_update_dates": list(pending_update_dates),
-        }
-        job_rows = [_job_row(j) for j in latest_jobs]
-    if _state_loaded:
-        try:
-            storage.set("job_state", snapshot)
-        except storage.StorageError as e:
-            print(f"⚠️ บันทึกคิวใบงานไม่สำเร็จ: {e}")
-    else:
-        print("⏸️ ยังโหลดใบงานเดิมไม่สำเร็จ ข้ามการบันทึกคิว (กันเขียนทับข้อมูลเดิม) จะบันทึกหลังโหลดได้")
-
-    global _logs_dirty
-    with state_lock:
-        dirty, activity, sent = _logs_dirty, list(_activity_log), list(_sent_log)
+    """บันทึกคิว + ประวัติใบงานลง Supabase (กันข้อมูลหายตอนเซิร์ฟเวอร์หลับ)
+    บันทึกทีละครั้ง และถ่ายสำเนาข้อมูลในล็อก เพื่อไม่ให้ฉบับเก่าไปทับฉบับใหม่"""
+    global _logs_dirty, _audit_dirty, _expected_drop
+    with _persist_lock:
+        with state_lock:
+            snapshot = {
+                "job_queue": list(job_queue),
+                "latest_jobs": list(latest_jobs),
+                "last_sender_id": last_sender_id,
+                "timer_start_time": timer_start_time,
+                "pending_update_dates": list(pending_update_dates),
+            }
+            job_rows = [_job_row(j) for j in latest_jobs]
+            total = len(snapshot["job_queue"]) + len(snapshot["latest_jobs"])
+            expected = _expected_drop
         if _state_loaded:
-            _logs_dirty = False
-    if dirty and _state_loaded:
+            prev = _last_saved["count"]
+            if prev is not None and prev - total > max(SHRINK_ALERT, expected):
+                audit("SHRINK", f"จำนวนใบงานลดจาก {prev} เหลือ {total} (ตั้งใจลบ/ตัด {expected}) ผิดปกติ "
+                                f"เก็บสำเนาฉบับก่อนหน้าไว้ที่ job_state_backup")
+                try:
+                    if _last_saved["snap"]:
+                        storage.set("job_state_backup", _last_saved["snap"])
+                except storage.StorageError as e:
+                    print(f"⚠️ สำรองฉบับก่อนหน้าไม่สำเร็จ: {e}")
+            try:
+                storage.set("job_state", snapshot)
+                _last_saved["count"], _last_saved["snap"] = total, snapshot
+                with state_lock:
+                    _expected_drop = max(0, _expected_drop - expected)
+            except storage.StorageError as e:
+                print(f"⚠️ บันทึกคิวใบงานไม่สำเร็จ: {e}")
+                audit("save_fail", f"บันทึก job_state ไม่สำเร็จ: {str(e)[:200]}")
+        else:
+            print("⏸️ ยังโหลดใบงานเดิมไม่สำเร็จ ข้ามการบันทึกคิว (กันเขียนทับข้อมูลเดิม) จะบันทึกหลังโหลดได้")
+
+        with state_lock:
+            dirty, activity, sent = _logs_dirty, list(_activity_log), list(_sent_log)
+            a_dirty, audits = _audit_dirty, list(_audit_log)
+            if _state_loaded:
+                _logs_dirty = False
+                _audit_dirty = False
+        if (dirty or a_dirty) and _state_loaded:
+            try:
+                if dirty:
+                    storage.set("activity_log", activity)
+                    storage.set("sent_log", sent)
+                if a_dirty:
+                    storage.set("audit_log", audits)
+            except storage.StorageError as e:
+                _logs_dirty = _logs_dirty or dirty
+                _audit_dirty = _audit_dirty or a_dirty
+                print(f"⚠️ บันทึกประวัติไม่สำเร็จ: {e}")
         try:
-            storage.set("activity_log", activity)
-            storage.set("sent_log", sent)
-        except storage.StorageError as e:
-            _logs_dirty = True
-            print(f"⚠️ บันทึกประวัติไม่สำเร็จ: {e}")
-    try:
-        sync_jobs_table(job_rows)
-    except Exception as e:  # ตาราง jobs เป็นของเสริม ห้ามทำให้ระบบหลักล้ม (เช่น อัป storage.py ไม่ครบ)
-        print(f"⚠️ บันทึกตาราง jobs ไม่สำเร็จ: {e} (เช็คว่าอัป storage.py ล่าสุดขึ้น Render แล้ว)")
+            sync_jobs_table(job_rows)
+        except Exception as e:  # ตาราง jobs เป็นของเสริม ห้ามทำให้ระบบหลักล้ม (เช่น อัป storage.py ไม่ครบ)
+            print(f"⚠️ บันทึกตาราง jobs ไม่สำเร็จ: {e} (เช็คว่าอัป storage.py ล่าสุดขึ้น Render แล้ว)")
 
 
 def restore_state():
@@ -745,8 +798,10 @@ def restore_state():
         snap = storage.get("job_state")
         activity = storage.get("activity_log") or []
         sent = storage.get("sent_log") or []
+        audits = storage.get("audit_log") or []
     except storage.StorageError as e:
         print(f"⚠️ โหลดคิวใบงานไม่สำเร็จ: {e}")
+        audit("load_fail", f"โหลดข้อมูลเดิมไม่สำเร็จ (จะไม่บันทึกทับ): {str(e)[:200]}")
         return False
     if snap:
         try:  # สำรองข้อมูลที่โหลดได้ไว้ 1 ชุดทุกครั้งที่เปิดเครื่อง ใช้กู้คืนถ้าข้อมูลหลักเสีย
@@ -757,14 +812,19 @@ def restore_state():
         # log เรียงเก่า->ใหม่ (ของเดิมไว้ก่อน) / ใบงานเรียงใหม่->เก่า (ที่เพิ่งเข้ามาไว้บน) / คิวเรียงตามลำดับเข้า
         _activity_log[:] = (activity + _activity_log)[-LOG_CAP["activity"]:]
         _sent_log[:] = (sent + _sent_log)[-LOG_CAP["sent"]:]
+        _audit_log[:] = (audits + _audit_log)[-AUDIT_CAP:]
         _state_loaded = True
         if not snap:
+            audit("load_ok", "โหลดแล้วแต่ไม่มีข้อมูลเดิมเลย (job_state ว่าง/ไม่เคยบันทึก)")
             return True
         job_queue = (snap.get("job_queue") or []) + job_queue
         latest_jobs = latest_jobs + (snap.get("latest_jobs") or [])
         last_sender_id = last_sender_id or snap.get("last_sender_id")
         pending_update_dates = pending_update_dates + [d for d in (snap.get("pending_update_dates") or [])
                                                        if d not in pending_update_dates]
+        audit("load_ok", f"โหลดข้อมูลเดิม: คิว {len(snap.get('job_queue') or [])} / ประวัติ {len(snap.get('latest_jobs') or [])} "
+                         f"(รวมกับที่เข้ามาระหว่างโหลดแล้ว คิว {len(job_queue)} / ประวัติ {len(latest_jobs)})")
+        _last_saved["count"] = len(snap.get("job_queue") or []) + len(snap.get("latest_jobs") or [])
         if (job_queue or pending_update_dates) and timer_thread is None:
             wait_seconds = int(load_settings().get("wait_seconds", 10))
             started = snap.get("timer_start_time") or time.time()
@@ -2603,10 +2663,19 @@ def process_batch_jobs():
         list_dates = [d for d in list_dates if _date_sort_key(d) >= _date_sort_key(today_str)]
         if today_str in list_dates and tomorrow_str not in list_dates:
             list_dates.append(tomorrow_str)
+        # รายการย่อต้องมีใบงานของ "วันนี้เป็นต้นไป" ทุกวันที่มีในระบบ ไม่ใช่แค่วันของใบที่เพิ่งเข้ามา
+        # (เช่น ลงใบเต็มวันที่ 05 แล้วรายการย่อของวันที่ 04 ต้องไม่หายไปจากข้อความ)
+        for j in latest_jobs:
+            d = _norm_job_date(j.get("date"))
+            if j.get("status") != "ยกเลิก" and d not in list_dates and _date_sort_key(d) >= _date_sort_key(today_str):
+                list_dates.append(d)
         target_sender_id = last_sender_id
         replies = dict(last_reply)
         last_reply = {}
         # เคลียร์คิวทันที ใบงานใหม่ที่เข้ามาระหว่างส่งจะเริ่มรอบใหม่ได้เลย
+        if jobs:
+            audit("batch_send", f"ส่งสรุป {len(jobs)} ใบ แล้วเคลียร์คิว (ใบงานยังอยู่ในประวัติ): "
+                                + ", ".join(str(j.get('id', '?')) for j in jobs[:15]))
         job_queue = []
         pending_update_dates = []
         timer_thread = None
@@ -3178,6 +3247,9 @@ def api_delete_record():
         sample = victims[0] if victims else None
         if sample:
             log_activity("delete", sample, "ลบจากหน้าเว็บ")
+            audit("delete_record", f"ลบจากหน้าเว็บ uid={uid} id={sample.get('id','?')} วันที่={_norm_job_date(sample.get('date'))} "
+                                   f"({len(victims)} รายการ) ip={request.headers.get('X-Forwarded-For', request.remote_addr)}",
+                  expected_drop=len(victims))
     in_table = False
     try:
         in_table = bool(storage.delete_rows("jobs", "uid", uid))
@@ -3304,6 +3376,83 @@ def api_update_summary():
                     "message": "บันทึกใบสรุปเรียบร้อยแล้ว" if changed else "ไม่มีการเปลี่ยนแปลง"})
 
 
+@app.route("/api/audit")
+def api_audit():
+    """ดูบันทึกตรวจสอบใบงานหาย (ใหม่สุดก่อน) ?limit=200"""
+    try:
+        limit = max(1, min(int(request.args.get("limit", 200)), AUDIT_CAP))
+    except ValueError:
+        limit = 200
+    with state_lock:
+        rows = list(reversed(_audit_log))[:limit]
+        info = {"instance": INSTANCE_ID, "loaded": _state_loaded, "queue": len(job_queue), "history": len(latest_jobs)}
+    return jsonify({"info": info, "events": rows})
+
+
+_AUDIT_ALERT = ("SHRINK", "load_fail", "save_fail", "delete_record", "clear_queue", "prune")
+
+
+@app.route("/audit")
+def audit_page():
+    import html as _h
+    d = api_audit().get_json()
+    i = d["info"]
+    rows = ""
+    for e in d["events"]:
+        style = ' style="background:#fee"' if e["event"] in _AUDIT_ALERT else ""
+        rows += (f"<tr{style}><td>{_h.escape(e['ts'])}</td><td>{_h.escape(e['inst'])}</td>"
+                 f"<td><b>{_h.escape(e['event'])}</b></td><td>{e['queue']}/{e['history']}</td>"
+                 f"<td>{'yes' if e.get('loaded') else 'NO'}</td><td>{_h.escape(e['detail'])}</td></tr>")
+    return ("<meta charset=utf-8><title>Audit</title><body style='font-family:sans-serif;font-size:13px'>"
+            "<h3>บันทึกตรวจสอบใบงานหาย</h3>"
+            f"<p>รอบปัจจุบัน <b>{i['instance']}</b> | โหลดข้อมูลเดิมแล้ว: {i['loaded']} | "
+            f"ตอนนี้ คิว {i['queue']} / ประวัติ {i['history']}</p>"
+            "<p><a href='/api/download_log'>⬇️ ดาวน์โหลด Log ทั้งหมด (CSV)</a> | "
+            "<a href='/api/download_log?format=txt'>TXT</a> | "
+            "<a href='/api/download_log?kind=audit'>เฉพาะระบบ</a></p>"
+            "<table border=1 cellpadding=4 style='border-collapse:collapse'><tr><th>เวลา</th><th>รอบ</th>"
+            "<th>เหตุการณ์</th><th>คิว/ประวัติ</th><th>โหลดแล้ว</th><th>รายละเอียด</th></tr>"
+            f"{rows}</table></body>")
+
+
+@app.route("/api/download_log", methods=["GET"])
+def api_download_log():
+    """ดาวน์โหลดไฟล์ Log ไว้ตรวจย้อนหลัง: ?kind=all|audit|activity|sent  &format=csv|txt (ค่าเริ่มต้น all, csv)"""
+    import csv, io
+    kind = (request.args.get("kind") or "all").lower()
+    fmt = (request.args.get("format") or "csv").lower()
+    with state_lock:
+        audits, acts, sents = list(_audit_log), list(_activity_log), list(_sent_log)
+    rows = []  # (ts, ประเภท, เหตุการณ์, รหัส, วันที่, รายละเอียด, รอบ, คิว, ประวัติ)
+    if kind in ("all", "audit"):
+        for e in audits:
+            rows.append((e.get("ts", ""), "ระบบ", e.get("event", ""), "", "", e.get("detail", ""),
+                         e.get("inst", ""), e.get("queue", ""), e.get("history", "")))
+    if kind in ("all", "activity"):
+        for a in acts:
+            rows.append((a.get("ts", ""), "ใบงาน", a.get("type", ""), a.get("id", ""), a.get("date", ""),
+                         " ".join(str(x) for x in (("Order " + str(a["order"])) if a.get("order") else "", a.get("detail", "")) if x),
+                         "", "", ""))
+    if kind in ("all", "sent"):
+        for x in sents:
+            tg = "; ".join(f"{t.get('to', '')}={'OK' if t.get('ok') else 'FAIL'}({t.get('via', '')})" for t in x.get("targets", []))
+            rows.append((x.get("ts", ""), "การส่ง", x.get("kind", ""), "", ",".join(x.get("dates", [])),
+                         f"{tg} | {str(x.get('text', ''))[:300]}", "", "", ""))
+    rows.sort(key=lambda r: r[0])
+    headers = ["เวลา", "ประเภท", "เหตุการณ์", "รหัส", "วันที่", "รายละเอียด", "รอบเซิร์ฟเวอร์", "คิว", "ประวัติ"]
+    tag = now_th().strftime("%Y%m%d-%H%M%S")
+    if fmt == "txt":
+        text = "\n".join(" | ".join(str(c).replace("\n", " ") for c in r) for r in rows)
+        data = io.BytesIO(("\ufeff" + text + "\n").encode("utf-8"))
+        return send_file(data, mimetype="text/plain; charset=utf-8", as_attachment=True, download_name=f"log_{kind}_{tag}.txt")
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(headers)
+    w.writerows(rows)
+    data = io.BytesIO(("\ufeff" + out.getvalue()).encode("utf-8"))
+    return send_file(data, mimetype="text/csv", as_attachment=True, download_name=f"log_{kind}_{tag}.csv")
+
+
 @app.route("/api/clear_queue", methods=["POST"])
 def api_clear_queue():
     global job_queue, timer_thread, timer_start_time, pending_update_dates
@@ -3311,6 +3460,9 @@ def api_clear_queue():
         if timer_thread:
             timer_thread.cancel()
         num_cleared = len(job_queue)
+        audit("clear_queue", f"กดล้างคิวจากหน้าเว็บ {num_cleared} ใบ: "
+                             + ", ".join(str(j.get('id', '?')) for j in job_queue[:15])
+                             + f" ip={request.headers.get('X-Forwarded-For', request.remote_addr)}")
         pending_update_dates = []
         cleared_keys = {_job_key(j) for j in job_queue}
         job_queue = []
@@ -3460,7 +3612,7 @@ def api_export_xlsx():
         w = csv.writer(out)
         w.writerow(EXPORT_HEADERS)
         w.writerows(_job_export_row(j) for j in jobs)
-        data = io.BytesIO(("﻿" + out.getvalue()).encode("utf-8"))
+        data = io.BytesIO(("\ufeff" + out.getvalue()).encode("utf-8"))
         return send_file(data, mimetype="text/csv", as_attachment=True, download_name=f"jobs_{tag}.csv")
     return send_file(buf, as_attachment=True, download_name=f"jobs_{tag}.xlsx",
                      mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
@@ -3502,8 +3654,18 @@ def _keep_alive_loop(url):
             print(f"⚠️ keep-alive ping ล้มเหลว: {e}")
 
 
+def _on_exit():
+    try:
+        audit("shutdown", "เซิร์ฟเวอร์กำลังปิด/รีสตาร์ท")
+        persist_state()
+    except Exception as e:
+        print(f"⚠️ บันทึกตอนปิดเครื่องไม่สำเร็จ: {e}")
+
+
 def _start_background():
+    atexit.register(_on_exit)
     load_settings()
+    audit("startup", f"เซิร์ฟเวอร์เริ่มทำงาน ที่เก็บ={'Supabase' if storage.using_supabase() else 'ไฟล์ในเครื่อง'}")
     loaded = restore_state()
     try:
         _seen_groups.update(storage.get("seen_groups") or {})
