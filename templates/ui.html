@@ -346,6 +346,7 @@
         <button type="button" class="export-day rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">⬇️ Excel (วันที่เลือก)</button>
         <button type="button" class="export-all rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">⬇️ Excel (ทั้งหมด)</button>
         <button type="button" class="export-sheets rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">📤 ส่งไป Google Sheet</button>
+        <button type="button" class="download-log rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">🧾 ดาวน์โหลด Log</button>
       </div>
 
       <!-- Responsive Table Container -->
@@ -389,6 +390,7 @@
         <button type="button" class="export-day rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">⬇️ Excel (วันที่เลือก)</button>
         <button type="button" class="export-all rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">⬇️ Excel (ทั้งหมด)</button>
         <button type="button" class="export-sheets rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">📤 ส่งไป Google Sheet</button>
+        <button type="button" class="download-log rounded-lg border border-[#E2E8F0] bg-white px-3 py-2 text-xs font-medium text-[#334155] hover:bg-[#F8FAFC]">🧾 ดาวน์โหลด Log</button>
        </div>
       </div>
 
@@ -1655,6 +1657,7 @@
         const d = (records && records.date) || '';
         window.location.href = '/api/export.xlsx' + (d ? '?from=' + encodeURIComponent(d) + '&to=' + encodeURIComponent(d) : '');
       }));
+      document.querySelectorAll('.download-log').forEach(b => b.addEventListener('click', () => { window.location.href = '/api/download_log'; }));
       document.querySelectorAll('.export-all').forEach(b => b.addEventListener('click', () => { window.location.href = '/api/export.xlsx'; }));
       document.querySelectorAll('.export-sheets').forEach(b => b.addEventListener('click', async () => {
         showToast('กำลังส่งออกไป Google Sheet...');
