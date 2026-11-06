@@ -744,11 +744,11 @@ def persist_state():
                 "pending_update_dates": list(pending_update_dates),
             }
             job_rows = [_job_row(j) for j in latest_jobs]
-            total = len(snapshot["job_queue"]) + len(snapshot["latest_jobs"])
+            total = len(snapshot["latest_jobs"])  # คิวคือใบงานชุดเดียวกับในประวัติ (นับซ้ำจะเตือนผิด)
             expected = _expected_drop
         if _state_loaded:
             prev = _last_saved["count"]
-            if prev is not None and prev - total > max(SHRINK_ALERT, expected):
+            if prev is not None and prev - total > expected + SHRINK_ALERT:
                 audit("SHRINK", f"จำนวนใบงานลดจาก {prev} เหลือ {total} (ตั้งใจลบ/ตัด {expected}) ผิดปกติ "
                                 f"เก็บสำเนาฉบับก่อนหน้าไว้ที่ job_state_backup")
                 try:
@@ -824,7 +824,7 @@ def restore_state():
                                                        if d not in pending_update_dates]
         audit("load_ok", f"โหลดข้อมูลเดิม: คิว {len(snap.get('job_queue') or [])} / ประวัติ {len(snap.get('latest_jobs') or [])} "
                          f"(รวมกับที่เข้ามาระหว่างโหลดแล้ว คิว {len(job_queue)} / ประวัติ {len(latest_jobs)})")
-        _last_saved["count"] = len(snap.get("job_queue") or []) + len(snap.get("latest_jobs") or [])
+        _last_saved["count"] = len(snap.get("latest_jobs") or [])
         if (job_queue or pending_update_dates) and timer_thread is None:
             wait_seconds = int(load_settings().get("wait_seconds", 10))
             started = snap.get("timer_start_time") or time.time()
@@ -2660,14 +2660,16 @@ def process_batch_jobs():
         today = now_th()
         today_str = today.strftime("%d/%m/%Y")
         tomorrow_str = (today + datetime.timedelta(days=1)).strftime("%d/%m/%Y")
-        list_dates = [d for d in list_dates if _date_sort_key(d) >= _date_sort_key(today_str)]
+        # งานกะดึก: ข้ามเที่ยงคืนแล้วยังถือว่าเป็นวันทำงานเดิมจนถึง 06:00 (ไม่ตัดวันก่อนหน้าทิ้งทันที)
+        cutoff_str = (today - datetime.timedelta(hours=6)).strftime("%d/%m/%Y")
+        list_dates = [d for d in list_dates if _date_sort_key(d) >= _date_sort_key(cutoff_str)]
         if today_str in list_dates and tomorrow_str not in list_dates:
             list_dates.append(tomorrow_str)
         # รายการย่อต้องมีใบงานของ "วันนี้เป็นต้นไป" ทุกวันที่มีในระบบ ไม่ใช่แค่วันของใบที่เพิ่งเข้ามา
         # (เช่น ลงใบเต็มวันที่ 05 แล้วรายการย่อของวันที่ 04 ต้องไม่หายไปจากข้อความ)
         for j in latest_jobs:
             d = _norm_job_date(j.get("date"))
-            if j.get("status") != "ยกเลิก" and d not in list_dates and _date_sort_key(d) >= _date_sort_key(today_str):
+            if j.get("status") != "ยกเลิก" and d not in list_dates and _date_sort_key(d) >= _date_sort_key(cutoff_str):
                 list_dates.append(d)
         target_sender_id = last_sender_id
         replies = dict(last_reply)
@@ -3070,10 +3072,22 @@ def api_records():
 
     dates = sorted({j["date"] for j in jobs} | {today} | set(history_dates()), key=_date_sort_key, reverse=True)
     full = sorted([j for j in jobs if j["date"] == date], key=_id_sort_key)
-    if not full and storage.using_supabase() and _iso_date(date):
+    if storage.using_supabase() and _iso_date(date):
+        # รวมใบงานจากตาราง jobs (ถาวร) กับที่อยู่ในหน่วยความจำ — เดิมดึงตารางเฉพาะตอนในระบบไม่มีเลย
+        # ทำให้ถ้าในระบบเหลือแค่ไม่กี่ใบ ใบที่เหลือในตารางจะไม่โผล่ (ดูเหมือนงานหาย)
         try:
             rows = storage.select_rows("jobs", {"job_date": f"eq.{_iso_date(date)}", "select": "*", "limit": "1000"})
-            full = sorted(_rows_to_jobs(rows), key=_id_sort_key)
+            have = {(j["date"], _job_key(j)) for j in full}
+            extra = []
+            for j in _rows_to_jobs(rows):
+                if j.get("status") == "ยกเลิก":
+                    continue
+                k = (_norm_job_date(j.get("date")), _job_key(j))
+                if k not in have:
+                    have.add(k)
+                    extra.append(j)
+            if extra:
+                full = sorted(full + extra, key=_id_sort_key)
         except Exception as e:
             print(f"⚠️ อ่านตาราง jobs ไม่สำเร็จ: {e}")
     return jsonify({
