@@ -782,6 +782,12 @@ def persist_state():
             job_rows = [_job_row(j) for j in latest_jobs]
             total = len(snapshot["latest_jobs"])  # คิวคือใบงานชุดเดียวกับในประวัติ (นับซ้ำจะเตือนผิด)
             expected = _expected_drop
+        # เขียนตาราง jobs (ที่เก็บถาวร) ก่อนเสมอ ไม่ขึ้นกับว่าโหลด job_state สำเร็จหรือ job_state เขียนไม่สำเร็จ
+        # ตารางเป็นแบบ upsert ทีละใบ จึงไม่มีทางทับของเก่าทั้งก้อน
+        try:
+            sync_jobs_table(job_rows)
+        except Exception as e:
+            print(f"⚠️ บันทึกตาราง jobs ไม่สำเร็จ: {e} (เช็คว่าอัป storage.py ล่าสุดขึ้น Render แล้ว)")
         if _state_loaded:
             prev = _last_saved["count"]
             if prev is not None and prev - total > expected + SHRINK_ALERT:
@@ -820,10 +826,6 @@ def persist_state():
                 _logs_dirty = _logs_dirty or dirty
                 _audit_dirty = _audit_dirty or a_dirty
                 print(f"⚠️ บันทึกประวัติไม่สำเร็จ: {e}")
-        try:
-            sync_jobs_table(job_rows)
-        except Exception as e:  # ตาราง jobs เป็นของเสริม ห้ามทำให้ระบบหลักล้ม (เช่น อัป storage.py ไม่ครบ)
-            print(f"⚠️ บันทึกตาราง jobs ไม่สำเร็จ: {e} (เช็คว่าอัป storage.py ล่าสุดขึ้น Render แล้ว)")
 
 
 def restore_state():
