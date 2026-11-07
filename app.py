@@ -710,6 +710,42 @@ def _rows_to_jobs(rows):
     return jobs
 
 
+def recover_from_table(filters=None, days=None, why=""):
+    """ดึงใบงานจากตาราง jobs ที่ 'ไม่อยู่ในหน่วยความจำ' กลับเข้า latest_jobs (ไม่ซ้ำ) คืนรายการที่กู้ได้
+    ใช้ตอนเปิดเครื่อง และตอนคำสั่งในแชทหาใบงานไม่เจอ (หน่วยความจำอาจโดนทับด้วยข้อมูลเก่า แต่ตารางเก็บถาวร)"""
+    global latest_jobs
+    if not storage.using_supabase():
+        return []
+    params = {"select": "*", "limit": "2000"}
+    if filters:
+        params.update(filters)
+    if days:
+        cutoff = (now_th() - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
+        params["job_date"] = f"gte.{cutoff}"
+    try:
+        rows = storage.select_rows("jobs", params)
+    except Exception as e:
+        print(f"⚠️ อ่านตาราง jobs ไม่สำเร็จ: {e}")
+        return []
+    new = []
+    with state_lock:
+        have = {(_norm_job_date(j.get("date")), _job_key(j)) for j in latest_jobs}
+        have |= {(_norm_job_date(j.get("date")), _job_key(j)) for j in job_queue}
+        for j in _rows_to_jobs(rows):
+            if j.get("status") == "ยกเลิก":
+                continue
+            k = (_norm_job_date(j.get("date")), _job_key(j))
+            if k in have:
+                continue
+            have.add(k)
+            new.append(j)
+        if new:
+            latest_jobs = latest_jobs + new
+            names = ", ".join(f"{j.get('id','?')}({j.get('date')})" for j in new[:15])
+            audit("recover", f"กู้ใบงานจากตาราง jobs กลับเข้าระบบ {len(new)} ใบ ({why}): {names}")
+    return new
+
+
 def history_dates():
     """วันที่ที่มีใบงานในตาราง jobs (เก็บผลไว้ 60 วินาที)"""
     if not storage.using_supabase():
@@ -841,6 +877,7 @@ def _restore_retry_loop():
         time.sleep(delay)
         if restore_state():
             print("✅ โหลดใบงานเดิมสำเร็จ (ลองใหม่) รวมกับใบงานที่เข้ามาระหว่างนี้แล้ว")
+            recover_from_table(days=KEEP_DAYS, why="โหลดซ้ำสำเร็จ")
             persist_state()
             return
         delay = min(delay * 2, 60)
@@ -1774,12 +1811,15 @@ def jobs_for_date(date):
             if k not in seen:
                 seen.add(k)
                 out.append(j)
-    if not out and storage.using_supabase() and _iso_date(date):
-        try:
-            rows = storage.select_rows("jobs", {"job_date": f"eq.{_iso_date(date)}", "select": "*", "limit": "1000"})
-            out = _rows_to_jobs(rows)
-        except Exception as e:
-            print(f"⚠️ อ่านตาราง jobs ไม่สำเร็จ: {e}")
+    if storage.using_supabase() and _iso_date(date):
+        new = recover_from_table({"job_date": f"eq.{_iso_date(date)}"}, why=f"สรุปวันที่ {date}")
+        for j in new:
+            k = _job_key(j)
+            if k not in seen and _norm_job_date(j.get("date")) == date:
+                seen.add(k)
+                out.append(j)
+        if new:
+            persist_state()
     return out
 
 
@@ -1814,19 +1854,30 @@ def _job_candidates(job_id, date_text=None):
         want = parse_update_date(date_text)
         if want is None:
             return [], f"อ่านวันที่ '{date_text}' ไม่ได้"
-    with state_lock:
-        seen, cands = set(), []
-        for j in latest_jobs:
-            if j.get("status") == "ยกเลิก" or str(j.get("id", "")).strip().upper() != job_id:
-                continue
-            d = _norm_job_date(j.get("date"))
-            if want and d != want:
-                continue
-            k = (d, _job_key(j))
-            if k in seen:
-                continue
-            seen.add(k)
-            cands.append(j)
+    def _scan():
+        with state_lock:
+            seen, cands = set(), []
+            for j in latest_jobs:
+                if j.get("status") == "ยกเลิก" or str(j.get("id", "")).strip().upper() != job_id:
+                    continue
+                d = _norm_job_date(j.get("date"))
+                if want and d != want:
+                    continue
+                k = (d, _job_key(j))
+                if k in seen:
+                    continue
+                seen.add(k)
+                cands.append(j)
+            return cands
+    cands = _scan()
+    if storage.using_supabase():
+        # หน่วยความจำอาจขาดใบงาน (แต่ตารางเก็บถาวร) -> ดึงกลับมาก่อนตัดสินว่าไม่พบ
+        flt = {"job_code": f"eq.{job_id}"}
+        if want and _iso_date(want):
+            flt["job_date"] = f"eq.{_iso_date(want)}"
+        if recover_from_table(flt, days=None if want else KEEP_DAYS, why=f"คำสั่งหา {job_id}"):
+            persist_state()
+            cands = _scan()
     if not cands:
         return [], f"ไม่พบใบงาน {job_id}" + (f" ของวันที่ {want}" if want else "")
     dates = sorted({_norm_job_date(j.get("date")) for j in cands}, key=_date_sort_key)
@@ -3686,6 +3737,10 @@ def _start_background():
     except Exception as e:
         print(f"⚠️ โหลดรายชื่อกลุ่มไม่สำเร็จ: {e}")
     if loaded:
+        try:  # ใบงานที่อยู่ในตารางถาวรแต่หายจากหน่วยความจำ (เช่น job_state โดนทับด้วยข้อมูลเก่า) ดึงกลับมา
+            recover_from_table(days=KEEP_DAYS, why="เปิดเครื่อง")
+        except Exception as e:
+            print(f"⚠️ กู้ใบงานจากตารางตอนเปิดเครื่องไม่สำเร็จ: {e}")
         try:
             persist_state()  # เขียนใบงานที่กู้คืนมาลงตาราง jobs ทันที (ย้ายข้อมูลเก่าเข้าตารางใหม่)
         except Exception as e:
