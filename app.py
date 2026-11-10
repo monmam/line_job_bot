@@ -1338,6 +1338,8 @@ def _parse_legacy(raw_text):
     if not job_id:
         id_match = re.search(r'\b(F\d+)\b', raw_text, re.IGNORECASE)
         job_id = id_match.group(1).strip() if id_match else ""
+    # ตัดข้อความในวงเล็บท้ายรหัสงานทิ้ง เช่น "F30 (D8024-04)" -> "F30"
+    job_id = re.sub(r'\s*[\(（][^)）]*[\)）]?\s*$', '', job_id).strip()
 
     date_match = re.search(r'(?:【(?:日期วันที่|日期|วันที่)】|วันที่|Date)[:\s]*([\d/\-]+)', raw_text, re.IGNORECASE)
     date_val = date_match.group(1).strip() if date_match else "-"
