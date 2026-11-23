@@ -1413,6 +1413,9 @@ def parse_job_text(raw_text, fallback_id="F01"):
     else:
         fields = _parse_legacy(raw_text)
     job_id = fields["id"] or fallback_id
+    # รหัสแบบ "C106/23" -> "JC106" (ใส่ J นำหน้า ตัด / และเลขข้างหลังออก)
+    if "/" in job_id:
+        job_id = "J" + job_id.split("/")[0].strip()
     time_val = _norm_time(fields["time"])
     flight_val = fields["flight"]
     order_val = fields["order"]
