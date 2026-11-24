@@ -1341,8 +1341,9 @@ def _parse_legacy(raw_text):
     # ตัดข้อความในวงเล็บท้ายรหัสงานทิ้ง เช่น "F30 (D8024-04)" -> "F30"
     job_id = re.sub(r'\s*[\(（][^)）]*[\)）]?\s*$', '', job_id).strip()
 
-    date_match = re.search(r'(?:【(?:日期วันที่|日期|วันที่)】|วันที่|Date)[:\s]*([\d/\-]+)', raw_text, re.IGNORECASE)
+    date_match = re.search(r'(?:【[^】\n]*(?:日期|วันที่)[^】\n]*】|วันที่|Date)[:\s]*([\d/\-]+)', raw_text, re.IGNORECASE)
     date_val = date_match.group(1).strip() if date_match else "-"
+    date_val = _norm_date(date_val) or date_val  # 2026-11-25 -> 25/11/2026
 
     time_match = re.search(r'(?:【(?:เวลาเวลา|เวลา|เวลา)】|เวลา|Time)[:\s]*([\d:]+)', raw_text, re.IGNORECASE)
     if not time_match:
