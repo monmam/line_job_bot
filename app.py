@@ -442,6 +442,10 @@ CAR_PRICING_MAP = {
     "5S": {"code": "5S", "price": "380"},
     "7 SEAT": {"code": "7S", "price": "480"},
     "7S": {"code": "7S", "price": "480"},
+    "5 SEATER": {"code": "5S", "price": "380"},
+    "7 SEATER": {"code": "7S", "price": "480"},
+    "COMFORT 5 SEATER": {"code": "5S", "price": "380"},
+    "COMFORT 7 SEATER": {"code": "7S", "price": "480"},
     "CAM/7S": {"code": "Cam7S", "price": "480"},
     "CAMRY/7S": {"code": "Cam7S", "price": "480"},
     "CAMRY OR 7SEAT": {"code": "Cam7S", "price": "480"},
@@ -880,6 +884,7 @@ def _restore_retry_loop():
         if restore_state():
             print("✅ โหลดใบงานเดิมสำเร็จ (ลองใหม่) รวมกับใบงานที่เข้ามาระหว่างนี้แล้ว")
             recover_from_table(days=KEEP_DAYS, why="โหลดซ้ำสำเร็จ")
+            fix_old_car_sizes()
             persist_state()
             return
         delay = min(delay * 2, 60)
@@ -2250,6 +2255,35 @@ def _auto_summary(job):
 def rebuild_summary(job):
     """สร้างใบสรุปใหม่จากข้อมูลของใบงาน (เวลา/เส้นทาง/รถ/Order/ราคา/ทะเบียน) ใช้ตอนแก้ไขใบสรุป"""
     return _with_compact_line(job, _auto_summary(job))
+
+
+def fix_old_car_sizes():
+    """แก้ขนาดรถของใบงานเก่าที่อ่านผิด (เช่น "7 seater" เคยอ่านไม่ออกแล้วได้ 5S) โดยอ่านใบงานเต็มใหม่
+    ข้ามงานยกเลิก และงานที่แก้ขนาดรถ/ข้อความเองจากหน้าเว็บ คืนจำนวนที่แก้"""
+    fixed = 0
+    with state_lock:
+        seen = set()
+        for job in list(job_queue) + list(latest_jobs):
+            if id(job) in seen:
+                continue
+            seen.add(id(job))
+            raw = job.get("raw_text") or job.get("text") or ""
+            if (not raw or _job_state(job) == "cancelled" or "car_code" in (job.get("edits") or {})
+                    or job.get("compact_line") or job.get("custom_summary")):
+                continue
+            try:
+                car = parse_job_text(raw, fallback_id=str(job.get("id", "")))
+            except Exception:
+                continue
+            if not car or car.get("car_code") == job.get("car_code"):
+                continue
+            job["car_code"], job["price"] = car["car_code"], car["price"]
+            job["formatted_summary"] = rebuild_summary(job)
+            fixed += 1
+    if fixed:
+        audit("fix_car", f"แก้ขนาดรถใบงานเก่า {fixed} ใบ")
+        print(f"🚗 แก้ขนาดรถใบงานเก่า {fixed} ใบ")
+    return fixed
 
 
 def _with_first_line(summary, line):
@@ -3749,6 +3783,10 @@ def _start_background():
             recover_from_table(days=KEEP_DAYS, why="เปิดเครื่อง")
         except Exception as e:
             print(f"⚠️ กู้ใบงานจากตารางตอนเปิดเครื่องไม่สำเร็จ: {e}")
+        try:
+            fix_old_car_sizes()
+        except Exception as e:
+            print(f"⚠️ แก้ขนาดรถใบงานเก่าไม่สำเร็จ: {e}")
         try:
             persist_state()  # เขียนใบงานที่กู้คืนมาลงตาราง jobs ทันที (ย้ายข้อมูลเก่าเข้าตารางใหม่)
         except Exception as e:
