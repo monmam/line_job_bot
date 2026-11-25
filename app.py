@@ -885,6 +885,7 @@ def _restore_retry_loop():
             print("✅ โหลดใบงานเดิมสำเร็จ (ลองใหม่) รวมกับใบงานที่เข้ามาระหว่างนี้แล้ว")
             recover_from_table(days=KEEP_DAYS, why="โหลดซ้ำสำเร็จ")
             fix_old_car_sizes()
+            fix_old_ticket_headers()
             persist_state()
             return
         delay = min(delay * 2, 60)
@@ -1510,9 +1511,29 @@ def _same_job(a, b):
     return False
 
 
+_SLASH_CODE_RE = re.compile(r'^([ \t"\'“”]*)([A-Za-z]{1,4}\d{1,4})[ \t]*/[ \t]*\d+([ \t"\'“”]*)$')
+
+
+def normalize_ticket_header(text):
+    """บันทึกใบงานต้นฉบับโดยแก้รหัสบรรทัดแรกแบบ C106/23 -> JC106 (ใส่ J นำหน้า ตัด / และเลขท้ายออก)"""
+    if not text:
+        return text
+    lines = text.split("\n")
+    for i, ln in enumerate(lines):
+        if not ln.strip():
+            continue
+        cr = "\r" if ln.endswith("\r") else ""
+        m = _SLASH_CODE_RE.match(ln.rstrip("\r"))
+        if m:
+            lines[i] = f"{m.group(1)}J{m.group(2)}{m.group(3)}{cr}"
+        break
+    return "\n".join(lines)
+
+
 def add_job_to_queue(text, sender_id=None):
     """เพิ่มใบงานเข้าคิว คืน (สำเร็จไหม, ข้อมูลใบงาน หรือ ข้อความ)"""
     global latest_jobs, last_sender_id
+    text = normalize_ticket_header(text)
 
     with state_lock:
         # รหัสใบงานตามลำดับในคิวปัจจุบัน (F01, F02, ...) กัน F ชนกัน
@@ -2255,6 +2276,27 @@ def _auto_summary(job):
 def rebuild_summary(job):
     """สร้างใบสรุปใหม่จากข้อมูลของใบงาน (เวลา/เส้นทาง/รถ/Order/ราคา/ทะเบียน) ใช้ตอนแก้ไขใบสรุป"""
     return _with_compact_line(job, _auto_summary(job))
+
+
+def fix_old_ticket_headers():
+    """ใบงานเก่าที่เก็บต้นฉบับรหัสแบบ C106/23 ไว้: แก้เป็น JC106 (เฉพาะงานที่มีเลข Order เพราะคีย์ไม่พึ่งข้อความ)"""
+    fixed = 0
+    with state_lock:
+        seen = set()
+        for job in list(job_queue) + list(latest_jobs):
+            if id(job) in seen:
+                continue
+            seen.add(id(job))
+            if not _order_ok(job):
+                continue
+            for k in ("raw_text", "text"):
+                new = normalize_ticket_header(job.get(k))
+                if new != job.get(k):
+                    job[k] = new
+                    fixed += 1
+    if fixed:
+        audit("fix_header", f"แก้รหัสต้นฉบับใบงานเก่า {fixed} ช่อง")
+    return fixed
 
 
 def fix_old_car_sizes():
@@ -3785,6 +3827,7 @@ def _start_background():
             print(f"⚠️ กู้ใบงานจากตารางตอนเปิดเครื่องไม่สำเร็จ: {e}")
         try:
             fix_old_car_sizes()
+            fix_old_ticket_headers()
         except Exception as e:
             print(f"⚠️ แก้ขนาดรถใบงานเก่าไม่สำเร็จ: {e}")
         try:
